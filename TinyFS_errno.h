@@ -1,0 +1,11 @@
+#define ERR_NO_FILE -1
+#define ERR_NBYTES -2
+#define ERR_FOPEN -3
+#define ERR_FCLOSE  -4
+#define ERR_DISK_CLOSED -5
+#define ERR_DISK_SIZE_EXCEEDED -6
+#define ERR_LSEEK -7
+#define ERR_FREAD -8
+#define ERR_FWRITE -9
+#define ERR_DEL_NODE -10
+#define ERR_INS_NODE -11
