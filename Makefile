@@ -2,17 +2,15 @@ CC = gcc
 CFLAGS = -Wall -g
 PROG = tinyFSDemo
 OBJS = tinyFSDemo.o libTinyFS.o libDisk.o
+EXTRACLEAN = tinyFSDemo libDisk
 
 all: tinyFSDemo libDisk
 
 $(PROG): $(OBJS)
 	$(CC) $(CFLAGS) -o $(PROG) $(OBJS)
 
-allclean: clean
-	@rm -f $(EXTRACLEAN)
-
 clean:	
-	rm -f $(OBJS) *~ TAGS
+	rm -f $(OBJS) $(EXTRACLEAN) *~ TAGS
 
 tinyFsDemo.o: tinyFSDemo.c libTinyFS.h tinyFS.h TinyFS_errno.h
 	$(CC) $(CFLAGS) -c -o $@ $<
