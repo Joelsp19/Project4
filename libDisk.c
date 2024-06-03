@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "TinyFS_errno.h"
+#include "libDisk.h"
 
 #define BLOCKSIZE 256
 
@@ -48,7 +49,6 @@ static Node* createNode(int diskNum, char* filename, int nBytes,int mode) {
 static int insert(int diskNum, char* filename, int nBytes,int mode) {
     Node* newNode = createNode(diskNum, filename, nBytes,mode);
     Node* head = diskList;
-       
     newNode->next = head;
     diskList = newNode; 
     return 0;
@@ -114,7 +114,7 @@ int openDisk(char *filename, int nBytes){
         // open/create file for writing
         // need to fopen twice because w+ would truncate 
         // an already existing file
-        nBytes = (nBytes % BLOCKSIZE) * nBytes;
+        nBytes = (nBytes - (nBytes%BLOCKSIZE));
         // tries to open file for writing if it exists 
         file = fopen(filename,"r+");
         int mode = OVERWRITE_MODE;
@@ -153,8 +153,11 @@ int readBlock(int disk, int bNum, void *block){
        return ERR_DISK_CLOSED; 
     }
     // check if bNum isn't too big
-    if (bNum*BLOCKSIZE > node->nBytes){
-        return ERR_DISK_SIZE_EXCEEDED;
+    
+    if (node->nBytes != 0){
+        if (bNum*BLOCKSIZE > node->nBytes){
+            return ERR_DISK_SIZE_EXCEEDED;
+        }
     }
 
     char* file = node->filename;
@@ -180,7 +183,7 @@ int writeBlock(int disk, int bNum, void *block){
     Node* node = findNode(disk);
     FILE* fd;
 
-    if (node->mode != WRITE_MODE || node->mode != OVERWRITE_MODE){
+    if (node->mode != WRITE_MODE && node->mode != OVERWRITE_MODE){
        return ERR_NO_WRITE; 
     }    
 
@@ -188,7 +191,6 @@ int writeBlock(int disk, int bNum, void *block){
        return ERR_DISK_CLOSED; 
     }
     // check if bNum isn't too big
-    printf("%d\n",node->nBytes);
     if (bNum*BLOCKSIZE > node->nBytes){
         return ERR_DISK_SIZE_EXCEEDED;
     }
@@ -214,7 +216,7 @@ int writeBlock(int disk, int bNum, void *block){
     return 0;
 }
 
-int main(){
+/*int main(){
     void* write_block[256];
     void* read_block[256];
     char* msg = "hello friends";
@@ -247,7 +249,7 @@ int main(){
 
     return 0; 
 
-}
+}*/
 
 
 
