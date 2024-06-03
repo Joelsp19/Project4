@@ -2,15 +2,22 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/types.h>
+#include <string.h>
 #include <unistd.h>
 #include "TinyFS_errno.h"
 
 #define BLOCKSIZE 256
 
+#define READ_MODE 0
+#define WRITE_MODE 1
+#define OVERWRITE_MODE 2
+
 typedef struct Node{
     int diskNum;
+    char* filename;
     FILE* fd;
     int nBytes;
+    int mode;
     struct Node* next;
 }Node;
 
@@ -21,11 +28,10 @@ int diskNumber = 0;
 // we need a way to store the fd, and nbytes
 // use a global linked list implementation
 Node* diskList = NULL;
-Node* cur = NULL;
 
 
 // DISKLIST HELPER FUNCTIONS
-static Node* createNode(int diskNum, FILE* fd, int nBytes) {
+static Node* createNode(int diskNum, char* filename, int nBytes,int mode) {
     Node* newNode = (Node*)malloc(sizeof(Node));
     if (newNode == NULL) {
         perror("malloc: "); 
@@ -33,22 +39,21 @@ static Node* createNode(int diskNum, FILE* fd, int nBytes) {
     }
     newNode->diskNum = diskNum;
     newNode->nBytes = nBytes;
-    newNode->fd = fd;
+    newNode->filename = filename;
+    newNode->mode = mode;
     newNode->next = NULL;
     return newNode;
 }
 
-static int insert(int diskNum, FILE* fd, int nBytes) {
-    Node* newNode = createNode(diskNum, fd, nBytes);
-    if (cur == NULL) {
-        diskList = newNode;
-        cur = diskList;
-    }else{
-        cur->next = newNode;
-        cur = cur->next;
-    }
+static int insert(int diskNum, char* filename, int nBytes,int mode) {
+    Node* newNode = createNode(diskNum, filename, nBytes,mode);
+    Node* head = diskList;
+       
+    newNode->next = head;
+    diskList = newNode; 
     return 0;
 }
+
 
 static int deleteNode(int disk){
     Node* temp = diskList;
@@ -74,7 +79,6 @@ static int deleteNode(int disk){
 
 static Node* findNode(int disk) {
     Node* current = diskList;
-    
     while (current != NULL) {
         if (current->diskNum == disk) {
             return current; // Key found
@@ -82,8 +86,7 @@ static Node* findNode(int disk) {
         current = current->next;
         }
     return NULL; // Key not found
-    }
-
+}
 
 // LIBDISK HELPER FUNCTIONS
 
@@ -98,18 +101,12 @@ int openDisk(char *filename, int nBytes){
         if (!file){
             return ERR_NO_FILE;
         }
-        if (fclose(file) != 0){
-            return ERR_FCLOSE;
-        }
         // Now we know that the file exists
-        file = fopen(filename,"a+");
-        if (!file){
-            return ERR_FOPEN;
-        }
-        if (insert(diskNumber, file, nBytes) == -1){
+        if (insert(diskNumber, filename, nBytes,READ_MODE) == -1){
             return ERR_INS_NODE;
         }
-        return diskNumber++; 
+        fclose(file);
+        return diskNumber; 
     }else if (nBytes < BLOCKSIZE){
         // less than blocksize bytes
         return ERR_NBYTES;
@@ -120,14 +117,17 @@ int openDisk(char *filename, int nBytes){
         nBytes = (nBytes % BLOCKSIZE) * nBytes;
         // tries to open file for writing if it exists 
         file = fopen(filename,"r+");
+        int mode = OVERWRITE_MODE;
         if (!file){
             // tries to create a file
             file = fopen(filename,"w+"); 
             if (!file){ 
                 return ERR_FOPEN;
             }
+            mode = WRITE_MODE;
         }
-        if (insert(diskNumber, file, nBytes) == -1){
+        fclose(file);
+        if (insert(diskNumber, filename, nBytes,mode) == -1){
             return ERR_INS_NODE;
         }
         return diskNumber++; 
@@ -138,15 +138,6 @@ int closeDisk(int disk){
     Node* node = findNode(disk);
     if (node == NULL){
         return ERR_DISK_CLOSED;    
-    }
-    FILE* fd = node->fd;
-    if (fd!= NULL){
-        if(fclose(fd) != 0){
-            return ERR_FCLOSE;
-        } 
-    }else{
-        // something went wrong
-       return ERR_DISK_CLOSED; 
     }
     if (deleteNode(disk) == -1){
         return ERR_DEL_NODE;
@@ -165,14 +156,22 @@ int readBlock(int disk, int bNum, void *block){
     if (bNum*BLOCKSIZE > node->nBytes){
         return ERR_DISK_SIZE_EXCEEDED;
     }
-    fd = node->fd;
-    // load block into block
-    if (!fseek(fd,bNum*BLOCKSIZE,SEEK_SET)){
-        return ERR_LSEEK; 
+
+    char* file = node->filename;
+    if (!file){
+        return ERR_NO_FILE;
     }
-    if (!fread(block,1,BLOCKSIZE,fd)){
+    fd = fopen(node->filename,"r");
+    
+    // load block into block
+    if (fseek(fd,bNum*BLOCKSIZE,SEEK_SET) != 0){
+        return ERR_FSEEK; 
+    }
+    fread(block,1,BLOCKSIZE,fd);
+    if (feof(fd) != 0 || ferror(fd)!=0){
         return ERR_FREAD;
-    } 
+    }
+    fclose(fd);
     return 0;
 }
 
@@ -180,27 +179,49 @@ int writeBlock(int disk, int bNum, void *block){
     // check if disk is open
     Node* node = findNode(disk);
     FILE* fd;
+
+    if (node->mode != WRITE_MODE || node->mode != OVERWRITE_MODE){
+       return ERR_NO_WRITE; 
+    }    
+
     if (node == NULL){
        return ERR_DISK_CLOSED; 
     }
     // check if bNum isn't too big
+    printf("%d\n",node->nBytes);
     if (bNum*BLOCKSIZE > node->nBytes){
         return ERR_DISK_SIZE_EXCEEDED;
     }
-    fd = node->fd;
-    // write from block if possible
-    if (!fseek(fd,bNum*BLOCKSIZE,SEEK_SET)){
-        return ERR_LSEEK; 
+    char* file = node->filename;
+    if (!file){
+        return ERR_NO_FILE;
     }
-    if (!fwrite(block,1,BLOCKSIZE,fd)){
+
+    if (node->mode == WRITE_MODE){
+        fd = fopen(file,"w+");
+    }else{
+        fd = fopen(file,"r+");
+    }
+
+    // write from block if possible
+    if (fseek(fd,bNum*BLOCKSIZE,SEEK_SET) != 0){
+        return ERR_FSEEK; 
+    }
+    fwrite(block,1,BLOCKSIZE,fd);
+    if (feof(fd) != 0 || ferror(fd)!=0){
         return ERR_FWRITE;
-    } 
+    }
     return 0;
 }
 
 int main(){
-    void* write_block = "hello friends";
+    void* write_block[256];
     void* read_block[256];
+    char* msg = "hello friends";
+    
+    memset(write_block,' ',sizeof(write_block));
+    strncpy((char*)write_block, msg, strlen(msg));
+    
     // test the BDD
     if (openDisk("disk0.txt",255) == ERR_NBYTES){printf("1\n");}
     if (openDisk("disk0.txt",-1) == ERR_NBYTES){printf("2\n");}
@@ -212,10 +233,18 @@ int main(){
     if (closeDisk(diskNum) == ERR_DISK_CLOSED){printf("4\n");}  
     // successfull disk1 open, write, read
     int diskNum2 = openDisk("disk1.txt",400);
-    printf("%d\n", diskNum2);
-    printf("h%d\n",writeBlock(diskNum2,1,write_block));
+    writeBlock(diskNum2,1,write_block);
     readBlock(diskNum2,1,read_block);
-    printf("%s\n",(char*)*read_block);
+    closeDisk(diskNum2);
+    printf("%s\n",(char*)read_block);
+    // open two disks that have already been created for reading
+    int diskNum3 = openDisk("disk1.txt",0);
+    int diskNum4 = openDisk("disk0.txt",0);
+    // try to overwrite the file we wrote to
+    msg = "overwrite";
+    strncpy((char *)write_block, msg, strlen(msg));
+    if (writeBlock(diskNum4,1,write_block) == -12){printf("5\n");}
+
     return 0; 
 
 }
