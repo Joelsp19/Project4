@@ -192,6 +192,8 @@ int writeBlock(int disk, int bNum, void *block){
     }
     // check if bNum isn't too big
     if (bNum*BLOCKSIZE > node->nBytes){
+        printf("%d\n",node->nBytes);
+        printf("%d\n",bNum*BLOCKSIZE);
         return ERR_DISK_SIZE_EXCEEDED;
     }
     char* file = node->filename;

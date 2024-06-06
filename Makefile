@@ -4,7 +4,7 @@ PROG = tinyFSDemo
 OBJS = tinyFSDemo.o libTinyFS.o libDisk.o diskTest.o
 EXTRACLEAN = tinyFSDemo libDisk diskTest
 
-all: diskTest
+all: diskTest libTinyFS
 
 $(PROG): $(OBJS)
 	$(CC) $(CFLAGS) -o $(PROG) $(OBJS)
@@ -20,6 +20,9 @@ diskTest.o: diskTest.c libDisk.c libDisk.h
 
 tinyFsDemo.o: tinyFSDemo.c libTinyFS.h tinyFS.h TinyFS_errno.h
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+libTinyFS: libTinyFS.o libDisk.c libDisk.h TinyFS_errno.h
+	$(CC) $(CFLAGS) -o libTinyFS libTinyFS.o libDisk.c libDisk.h
 
 libTinyFS.o: libTinyFS.c libTinyFS.h tinyFS.h libDisk.h libDisk.o TinyFS_errno.h
 	$(CC) $(CFLAGS) -c -o $@ $<

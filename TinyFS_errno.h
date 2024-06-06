@@ -1,3 +1,4 @@
+#define SUCCESS 0
 #define ERR_NO_FILE -1
 #define ERR_NBYTES -2
 #define ERR_FOPEN -3
@@ -10,3 +11,6 @@
 #define ERR_DEL_NODE -10
 #define ERR_INS_NODE -11
 #define ERR_NO_WRITE -12
+
+#define ERR_INVALID_TINYFS -13 
+#define ERR_DISK_MOUNTED -14
