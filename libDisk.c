@@ -171,6 +171,7 @@ int readBlock(int disk, int bNum, void *block){
         return ERR_FSEEK; 
     }
     fread(block,1,BLOCKSIZE,fd);
+    fflush(fd);
     if (feof(fd) != 0 || ferror(fd)!=0){
         return ERR_FREAD;
     }
@@ -192,8 +193,6 @@ int writeBlock(int disk, int bNum, void *block){
     }
     // check if bNum isn't too big
     if (bNum*BLOCKSIZE > node->nBytes){
-        printf("%d\n",node->nBytes);
-        printf("%d\n",bNum*BLOCKSIZE);
         return ERR_DISK_SIZE_EXCEEDED;
     }
     char* file = node->filename;
@@ -203,15 +202,20 @@ int writeBlock(int disk, int bNum, void *block){
 
     if (node->mode == WRITE_MODE){
         fd = fopen(file,"w+");
+        node->mode = OVERWRITE_MODE;
     }else{
         fd = fopen(file,"r+");
     }
+
 
     // write from block if possible
     if (fseek(fd,bNum*BLOCKSIZE,SEEK_SET) != 0){
         return ERR_FSEEK; 
     }
-    fwrite(block,1,BLOCKSIZE,fd);
+    if (fwrite(block,1,BLOCKSIZE,fd) != BLOCKSIZE){
+        return ERR_FWRITE;
+    }
+    fflush(fd);
     if (feof(fd) != 0 || ferror(fd)!=0){
         return ERR_FWRITE;
     }
