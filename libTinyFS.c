@@ -332,17 +332,18 @@ static int modifyFileFromDirectory(char* name,char* buffer,char* newContent){
                 for(j=0;j<9;j++){
                     buffer[i+j] = 0;
                 }
-            }
-            for(j=0;j<8;j++){
-                if (newContent == '\0'){
-                    flag = 1;
+            }else{
+                for(j=0;j<8;j++){
+                    if (newContent[j] == '\0'){
+                        flag = 1;
+                    }
+                    if (!flag){
+                        buffer[i+j] = newContent[j];
+                    }else{
+                        buffer[i+j] = 0;
+                    }
                 }
-                if (!flag){
-                    buffer[i+j] = newContent[i];
-                }else{
-                    buffer[i+j] = 0;
-                }
-            }
+            }   
             return 1; // returns true if worked
         }
     }
@@ -860,11 +861,12 @@ int tfs_readdir()
 
 int tfs_rename(fileDescriptor FD, char* newName)
 {
-    if (sizeof(newName) > 8)
+    if (strlen(newName) > 8)
     {
         return -1;
     }
     int i;
+    int err_code;
     char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
     char* temp_fil = (char*)malloc(sizeof(char) * 9);
 
@@ -881,6 +883,29 @@ int tfs_rename(fileDescriptor FD, char* newName)
     {
         return -1;
     }
+    char* path = fil->fileName;
+
+    //retrieve inode block and change the name within the inode block
+    int inode = searchForFile(path, read_block, temp_fil);
+    readBlock(mountedDiskNum, inode, read_block);
+    for (i = 0; i < 8; i++)
+    {
+        if (newName[i] == '\0')
+        {
+            break;
+        }
+        read_block[4+i] = newName[i];
+    }
+   
+    //if name is less than 8, put null characs at the end
+    while (i < 8)
+    {
+        read_block[4+i] = '\0';
+        i = i + 1;
+    }
+    
+    writeBlock(mountedDiskNum, inode, read_block);
+  
     //HAVE TO STILL GO TO LAST DIRECTORY AND CHANGE THE NAME IN THERE
     
     int dir_inode = getRecentDirectory(path,read_block);
@@ -893,31 +918,13 @@ int tfs_rename(fileDescriptor FD, char* newName)
     err_code = modifyFileFromDirectory(temp_fil,read_block,newName);
     if (err_code < 0){
         free(read_block);
-        free(write_block);
         free(temp_fil);
         return -1;
     }
-
-    //retrieve inode block and change the name within the inode block
-    int inode = searchForFile(fil -> fileName, read_block, temp_fil);
-    readBlock(mountedDiskNum, inode, read_block);
-    for (i = 0; i < 8; i++)
-    {
-        if (newName[i] == '\0')
-        {
-            break;
-        }
-        read_block[4+i] = newName[i];
-    }
-    //if name is less than 8, put null characs at the end
-    while (i < 8)
-    {
-        read_block[4+i] = '\0';
-        i = i + 1;
-    }
-
+    writeBlock(mountedDiskNum,dir_inode,read_block);
+    
     free(read_block);
-    free(filename);
+    free(temp_fil);
     return 1;
 }
 
@@ -1051,9 +1058,9 @@ int main(){
     err = tfs_readByte(fd,buffer);
     printf("%d\n",err);
     tfs_deleteFile(fd);
-
+    
     tfs_readdir(); 
-
+    tfs_rename(fd2,"tymon");
     tfs_unmount();
     return 0;
 }
