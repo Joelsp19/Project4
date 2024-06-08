@@ -317,18 +317,31 @@ static int checkDirectory(char* name,char* buffer){
 }
 
 
-static int deleteFileFromDirectory(char* name,char* buffer){
+static int modifyFileFromDirectory(char* name,char* buffer,char* newContent){
     int i;
     int j;
     char* entry;
     int len;
+    int flag = 0;
     for (i=4;i<BLOCKSIZE;i+=9){
         entry = substring(buffer,i,i+8);
         len = strlen(name);
         printf("entry %s\n",entry);
         if (strncmp(name,entry,len) == 0){
-            for(j=0;j<9;j++){
-                buffer[i+j] = 0;
+            if (newContent == NULL){
+                for(j=0;j<9;j++){
+                    buffer[i+j] = 0;
+                }
+            }
+            for(j=0;j<8;j++){
+                if (newContent == '\0'){
+                    flag = 1;
+                }
+                if (!flag){
+                    buffer[i+j] = newContent[i];
+                }else{
+                    buffer[i+j] = 0;
+                }
             }
             return 1; // returns true if worked
         }
@@ -782,15 +795,14 @@ int tfs_deleteFile(fileDescriptor FD)
     readBlock(mountedDiskNum,cur_directory,read_block);
     int dir_inode = getRecentDirectory(path,read_block);
     if (dir_inode <= 0){
-        dir_inode = 2;// assume its the root 
+        dir_inode = cur_directory;// assume its the root 
     }
-    printf("%d\n", cur_directory);    
  
     // we know have the most recent directory in read_block 
     readBlock(mountedDiskNum,dir_inode,read_block);
     
     printf("%s\n",temp_fil);
-    err_code = deleteFileFromDirectory(temp_fil,read_block);
+    err_code = modifyFileFromDirectory(temp_fil,read_block,NULL);
     printf("%d\n", err_code);
     if (err_code < 0){
         free(read_block);
@@ -845,6 +857,71 @@ int tfs_readdir()
     free(filename);
     return 1;
 }
+
+int tfs_rename(fileDescriptor FD, char* newName)
+{
+    if (sizeof(newName) > 8)
+    {
+        return -1;
+    }
+    int i;
+    char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
+    char* temp_fil = (char*)malloc(sizeof(char) * 9);
+
+    //read from superblock, get curr directory file
+    readBlock(mountedDiskNum,0,read_block);
+    int root_inode = read_block[5];
+    readBlock(mountedDiskNum,root_inode,read_block);
+    int cur_directory = read_block[2];
+    readBlock(mountedDiskNum,cur_directory,read_block);
+
+     //find inode block based on file descriptor
+    Node* fil = findNode(FD);
+    if (fil == NULL)
+    {
+        return -1;
+    }
+    //HAVE TO STILL GO TO LAST DIRECTORY AND CHANGE THE NAME IN THERE
+    
+    int dir_inode = getRecentDirectory(path,read_block);
+    if (dir_inode <= 0){
+        dir_inode = cur_directory;// assume its the root 
+    }
+ 
+    // we know have the most recent directory in read_block 
+    readBlock(mountedDiskNum,dir_inode,read_block);
+    err_code = modifyFileFromDirectory(temp_fil,read_block,newName);
+    if (err_code < 0){
+        free(read_block);
+        free(write_block);
+        free(temp_fil);
+        return -1;
+    }
+
+    //retrieve inode block and change the name within the inode block
+    int inode = searchForFile(fil -> fileName, read_block, temp_fil);
+    readBlock(mountedDiskNum, inode, read_block);
+    for (i = 0; i < 8; i++)
+    {
+        if (newName[i] == '\0')
+        {
+            break;
+        }
+        read_block[4+i] = newName[i];
+    }
+    //if name is less than 8, put null characs at the end
+    while (i < 8)
+    {
+        read_block[4+i] = '\0';
+        i = i + 1;
+    }
+
+    free(read_block);
+    free(filename);
+    return 1;
+}
+
+
 
 
 int tfs_seek(fileDescriptor FD, int offset){
