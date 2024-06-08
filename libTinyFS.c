@@ -312,11 +312,33 @@ static int checkDirectory(char* name,char* buffer){
 }
 
 
+static int addFileToBuffer(char* name, char* buffer, int inode){
+    int i;
+    int j;
+    for (i=4; i<BLOCKSIZE;i+=9){
+        if (buffer[i] == '\0'){
+            for (j=0;j<8;j++){
+                if (name[i] == '\0'){
+                    buffer[i+j] = inode;
+                    return 0;
+                }
+                buffer[i+j] = name[j];  
+            }
+            buffer[i+j] = inode; 
+            return 0;
+        }
+    }
+    // we can't find enough space in current dictionary
+    // TO-DO: extend the file extent
+    return -1;
+}
+
 int addNewFile(char* name){
 
     // inode
     char* inode_block = malloc(BLOCKSIZE * sizeof(char));
     char* read_block = malloc(BLOCKSIZE * sizeof(char));
+    int err_code;
 
     memset(inode_block,0x00,BLOCKSIZE);
     inode_block[0] = '2';
@@ -325,16 +347,25 @@ int addNewFile(char* name){
     inode_block[3] = 0x00;  //empty   
     int i;
 
-    /hello/goodbye/file
-    
+    // read from superblock
     readBlock(mountedDiskNum,0,read_block);
+    int freeBlock = read_block[2]; // next free block
+    // check if disk is full
+    if (freeBlock == 0){
+        free(inode_block);
+        free(read_block);
+        return -1;
+    }
     int root_inode = read_block[5];
     readBlock(mountedDiskNum,root_inode,read_block);
-    int root_directory = read_block[2];
-    readBlock(mountedDiskNum,root_directory,read_block);
+    int cur_directory = read_block[2];
+    readBlock(mountedDiskNum,cur_directory,read_block);
     //now readblock contains root directory file extent
 
     int anchor = 1;
+    if (name[0] != '/'){
+        return -20;
+    }
     for (i=1;i<sizeof(name);i++){
         if (name[i] == '/'){
             //directory name 
@@ -343,8 +374,8 @@ int addNewFile(char* name){
             int inode = checkDirectory(dirName,read_block);
             if (inode != 0){
                 readBlock(mountedDiskNum,inode,read_block);
-                root_directory = read_block[2];
-                readBlock(mountedDiskNum,root_directory,read_block);
+                cur_directory = read_block[2];
+                readBlock(mountedDiskNum,cur_directory,read_block);
                 // now read_block has the contents of the directory
             }else{
                 return -30;
@@ -353,36 +384,24 @@ int addNewFile(char* name){
         }   
     }
     char* filename = substring(name,anchor,sizeof(name));
-
+    printf("filename: %s\n", filename);
     if (sizeof(filename) > 8){
         return -1;
     }
 
+    // for directory implementation we are adding the filename
+    // the current directory is in read_block
+    addFileToBuffer(filename,read_block,freeBlock);
+    writeBlock(mountedDiskNum,cur_directory,read_block);
+ 
     for (i=0;i<8;i++){
         if (filename[i] == '\0'){
             break;
         }
-        inode_block[4+i] = name[i];
+        inode_block[4+i] = filename[i];
     }   
     inode_block[12] = 0; // size of the new file
 
-    // find free block
-    int err_code;
-    err_code = readBlock(mountedDiskNum,0,read_block);
-    if (err_code < 0){
-        free(inode_block);
-        free(read_block);
-        return err_code;
-    }
-    int freeBlock = read_block[2]; // next free block
-    printf("freeblock %d\n",freeBlock);
-
-    // check if disk is full
-    if (freeBlock < 1){
-        free(inode_block);
-        free(read_block);
-        return -1;
-    }
     // get the next free block to update in superblock
     err_code = readBlock(mountedDiskNum,freeBlock,read_block);
     if (err_code < 0){
@@ -392,43 +411,6 @@ int addNewFile(char* name){
     }
     int nextBlock = read_block[2];
     
-    // update superblock  
-    err_code = readBlock(mountedDiskNum,0,read_block);
-    if (err_code < 0){
-        free(inode_block);
-        free(read_block);
-        return err_code;
-    }
-    read_block[2] = nextBlock;
-    int root_inode = read_block[5];
-    err_code = writeBlock(mountedDiskNum,0,read_block);
-    if (err_code < 0){
-        free(inode_block);
-        free(read_block);
-        return err_code;
-    }
-
-    //add the inode block number to the root inode directory
-    err_code = readBlock(mountedDiskNum,root_inode,read_block);
-    if (err_code < 0){
-        free(inode_block);
-        free(read_block);
-        return err_code;
-    }
-   
-    i=4;
-    while(read_block[i] != 0x00){
-        i++;
-    }
-    read_block[i] = freeBlock;
-
-    err_code = writeBlock(mountedDiskNum,root_inode,read_block);
-    if (err_code < 0){
-        free(inode_block);
-        free(read_block);
-        return err_code;
-    }
- 
     // add the inode block
     err_code = writeBlock(mountedDiskNum,freeBlock,inode_block);
     if (err_code < 0){
@@ -437,6 +419,21 @@ int addNewFile(char* name){
         return err_code;
     }
     
+    // update superblock  
+    err_code = readBlock(mountedDiskNum,0,read_block);
+    if (err_code < 0){
+        free(inode_block);
+        free(read_block);
+        return err_code;
+    }
+    read_block[2] = nextBlock;
+    err_code = writeBlock(mountedDiskNum,0,read_block);
+    if (err_code < 0){
+        free(inode_block);
+        free(read_block);
+        return err_code;
+    }
+
     // add the fdGlobal to the linked list 
     err_code = insert(fdGlobal, name);
     if (err_code < 0){
@@ -611,7 +608,8 @@ int tfs_seek(fileDescriptor FD, int offset){
 int main(){
     printf("%d\n",tfs_mkfs("disk0.dsk",2562));
     tfs_mount("disk0.dsk");
-    fileDescriptor fd = tfs_openFile("ritvik");
+    fileDescriptor fd = tfs_openFile("/ritvik");
+    fileDescriptor fd2 = tfs_openFile("/joel");
     char* message = "hi my name is Joel";
     int err = tfs_writeFile(fd,message,sizeof(message));
     printf("%d\n",err);
