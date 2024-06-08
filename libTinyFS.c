@@ -25,7 +25,7 @@ fileDescriptor fdGlobal = 1;
 
 
 
-// DISKLIST HELPER FUNCTIONS
+// LIBTINY HELPER FUNCTIONS
 static Node* createNode(fileDescriptor fd,char* filename) {
     Node* newNode = (Node*)malloc(sizeof(Node));
     if (newNode == NULL) {
@@ -92,10 +92,13 @@ static Node* findNodeFilename(char* filename) {
 }
 
 
+// libTiny function implementation
+
 int tfs_mkfs(char* filename, int nBytes){
     char* write_block = malloc(BLOCKSIZE * sizeof(char));
     char* super_block = malloc(BLOCKSIZE * sizeof(char));
     char* root_inode = malloc(BLOCKSIZE * sizeof(char));
+    char* root_directory = malloc(BLOCKSIZE * sizeof(char));
     int diskNum = openDisk(filename,nBytes);
     int err_code;
     if (diskNum < 0){
@@ -130,7 +133,7 @@ int tfs_mkfs(char* filename, int nBytes){
     memset(super_block,0x00,BLOCKSIZE);
     super_block[0] = '0';
     super_block[1] = MAGIC_NUMBER;
-    super_block[2] = 2;//pointer to next free block
+    super_block[2] = 3;//pointer to next free block
     super_block[3] = 0x00;  //empty 
     super_block[4] = MAGIC_NUMBER;//magic number
     super_block[5] = 1;//pointer to root inode
@@ -145,16 +148,33 @@ int tfs_mkfs(char* filename, int nBytes){
         return err_code;
     }
    
-    //set the inodeblock
+    //set the root_inode
     memset(root_inode,0x00,BLOCKSIZE);
     root_inode[0] = '2';
     root_inode[1] = MAGIC_NUMBER;
+    root_inode[2] = 2
+
+    //set the root_directory
+    memset(root_directory,0x00,BLOCKSIZE);
+    root_directory[0] = '5'
+    root_directory[1] = MAGIC_NUMBER;
+    root_directory[2] = 0
  
     err_code = writeBlock(diskNum,1,root_inode);
     if (err_code < 0){
         free(write_block);
         free(super_block);
         free(root_inode);
+        free(root_directory);
+        return err_code;
+    }
+
+    err_code = writeBlock(diskNum,2,root_directory);
+    if (err_code < 0){
+        free(write_block);
+        free(super_block);
+        free(root_inode);
+        free(root_directory);
         return err_code;
     }
 
@@ -332,7 +352,7 @@ int addNewFile(char* name){
         return err_code;
     }
 
-    //add the inode block number to the root inode block
+    //add the inode block number to the root inode directory
     err_code = readBlock(mountedDiskNum,root_inode,read_block);
     if (err_code < 0){
         free(inode_block);
