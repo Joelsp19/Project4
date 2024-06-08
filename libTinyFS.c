@@ -578,10 +578,16 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
         printf("first free block %d\n",free_block);
         //lets write to this inodes next
         read_block[2] = free_block;
-        //read_block[12] = size % (BLOCKSIZE-4); // size of last block
-        read_block[12] = size;
-        read_block[13] = size / BLOCKSIZE; // number of bytes
-        read_block[14] = 0; // file pointer location
+        read_block[12] = size % (BLOCKSIZE-4); // size of last block
+        if (read_block[12] == 0){
+            read_block[13] = size / (BLOCKSIZE-4); // number of bytes
+        }else{
+            read_block[13] = size / (BLOCKSIZE-4) + 1; // number of bytes
+        }
+        printf("double check 12 %d\n",read_block[12]);
+        printf("double check 13 %d\n",read_block[13]);
+        read_block[14] = 0; // cur byte file pointer
+        read_block[15] = 0; // cur block file pointer
         err_code = writeBlock(mountedDiskNum,inode,read_block);
         if (err_code < 0){
             free(block);
@@ -664,6 +670,37 @@ int tfs_deleteFile(fileDescriptor FD){
 
 }
 
+int tfs_seek(fileDescriptor FD, int offset){
+
+    char* temp_fil = (char*)malloc(sizeof(char) * 9);
+    char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
+
+    //read from superblock, get curr directory file
+    readBlock(mountedDiskNum,0,read_block);
+    int root_inode = read_block[5];
+    readBlock(mountedDiskNum,root_inode,read_block);
+    int cur_directory = read_block[2];
+    readBlock(mountedDiskNum,cur_directory,read_block);
+    //find filename from filedescriptor and find correct inode file
+    Node* node = findNode(FD);
+    if (node == NULL){
+        free(temp_fil);
+        free(read_block);
+        return -1;    
+    }
+    char* filename = node -> fileName;
+    int inode = searchForFile(filename, read_block, temp_fil);
+   
+    readBlock(mountedDiskNum, inode, read_block); 
+    //set file_pointer to offset
+    int blocksToRead = (offset - (offset % (BLOCKSIZE-4))) / (BLOCKSIZE-4);
+    int currByte = offset % (BLOCKSIZE - 4);
+    
+    read_block[14] = currByte;
+    read_block[15] = blocksToRead;
+    return writeBlock(mountedDiskNum, inode, read_block);
+}
+
 int tfs_readByte(fileDescriptor FD, char* buffer){
     char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
     char* temp_fil = (char*)malloc(sizeof(char) * 9);
@@ -680,13 +717,25 @@ int tfs_readByte(fileDescriptor FD, char* buffer){
     Node* fil = (findNode(FD));
     if (fil == NULL)
     {
-         //error
-         return -1;
+        free(read_block);
+        free(temp_fil); 
+        return -1;
     }
-    int inode = searchForFile(fil -> fileName, read_block, temp_fil);
+    char* filename = fil->fileName;
+    int inode = searchForFile(filename, read_block, temp_fil);
+    readBlock(mountedDiskNum,inode,read_block);
+
     //get size of file, file_pointer, and first file_extent from inode 
-    int file_size = read_block[12];
-    int file_pointer = read_block[14];
+    int file_size;
+    if (read_block[12] == 0){
+        file_size = (read_block[13]) * (BLOCKSIZE-4);
+    }else{
+        file_size = read_block[12] + ((read_block[13]-1) * (BLOCKSIZE-4));
+    }
+     
+    char fp_bytes = read_block[14];
+    char fp_blocks = read_block[15];
+    int file_pointer = fp_bytes + fp_blocks*(BLOCKSIZE-4); 
     int file_extent = read_block[2];
 
     if (file_pointer >= file_size)
@@ -702,8 +751,9 @@ int tfs_readByte(fileDescriptor FD, char* buffer){
         //if 0-251, 0 blocks, if 252-503, 1 blocks, etc...
         blocksToRead = (file_pointer - (file_pointer % (BLOCKSIZE-4))) / (BLOCKSIZE-4);
         currByte = file_pointer % (BLOCKSIZE - 4);
+        
 
-        //find the correct block to read based on blocksToRead
+        // reads the first file extent and continues if necessary 
         while (blocksToRead >= 0)
         {
             //now read_block contains next file_extent 
@@ -713,40 +763,37 @@ int tfs_readByte(fileDescriptor FD, char* buffer){
         }
 
         //copies the current byte pointed by filepointer into buffer?
-        strncpy(buffer, read_block[currByte], 1);
+        buffer[0] = read_block[currByte+4];
+        buffer[1] = '\0';
+        // strncpy(buffer, read_block[currByte], 1);
         //valid af
         return 1;
 
     }
 }
 
-int tfs_seek(fileDescriptor FD, int offset){
-
-    char* temp_fil = (char*)malloc(sizeof(char) * 9);
-
-    //read from superblock, get curr directory file
-    readBlock(mountedDiskNum,0,read_block);
-    int root_inode = read_block[5];
-    readBlock(mountedDiskNum,root_inode,read_block);
-    int cur_directory = read_block[2];
-    readBlock(mountedDiskNum,cur_directory,read_block);
-
-    //find filename from filedescriptor and find correct inode file
-    char* filename = (findNode(FD)) -> fileName;
-    int inode = searchForFile(filename, read_block, temp_fil);
-    //set file_pointer to offset
-    read_block[14] = offset;
-    return writeBlock(mountedDiskNum, inode, read_block);
-}
 
 int main(){
     printf("%d\n",tfs_mkfs("disk0.dsk",2562));
     tfs_mount("disk0.dsk");
     fileDescriptor fd = tfs_openFile("/ritvik");
     fileDescriptor fd2 = tfs_openFile("/joel");
+    
     fileDescriptor fd3 = tfs_openFile("/joel");
     char* message = "hi my name is Joel. Tymon is an asshole! What does life mean? Computer Science is the worst major in the world!AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    printf("strlen %d\n", strlen(message));
     int err = tfs_writeFile(fd,message,strlen(message));
+    printf("writeFile %d\n",err);
+    
+    char* buffer = (char *)malloc(sizeof(char) * 2);
+    tfs_readByte(fd,buffer);
+    printf("buffer: %s\n",buffer); 
+    tfs_readByte(fd,buffer);
+    printf("buffer: %s\n",buffer); 
+    tfs_seek(fd,509); 
+    tfs_readByte(fd,buffer);
+    printf("buffer: %s\n",buffer); 
+    err = tfs_readByte(fd,buffer);
     printf("%d\n",err);
     tfs_unmount();
     return 0;
