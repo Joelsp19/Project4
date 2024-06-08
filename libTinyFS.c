@@ -136,10 +136,9 @@ int tfs_mkfs(char* filename, int nBytes){
     super_block[2] = 3;//pointer to next free block
     super_block[3] = 0x00;  //empty 
     super_block[4] = MAGIC_NUMBER;//magic number
-    super_block[5] = 1;//pointer to root inode
+    super_block[5] = 1;//pointer to root inode directory
     super_block[6] = numBlocks; //size of the disk
-   
- 
+    
     err_code = writeBlock(diskNum,0,super_block);
     if (err_code < 0){
         free(write_block);
@@ -147,18 +146,22 @@ int tfs_mkfs(char* filename, int nBytes){
         free(root_inode);
         return err_code;
     }
-   
-    //set the root_inode
-    memset(root_inode,0x00,BLOCKSIZE);
-    root_inode[0] = '2';
-    root_inode[1] = MAGIC_NUMBER;
-    root_inode[2] = 2
 
-    //set the root_directory
+   
+    //set the root_directory_inode
+    memset(root_inode,0x00,BLOCKSIZE);
+    root_inode[0] = '5';
+    root_inode[1] = MAGIC_NUMBER;
+    root_inode[2] = 2 // address of directory file extent
+    root_inode[4] = "/"; // name of directory
+
+    root_inode[12] = 0; //size of directory 
+
+   //set the root_directory_inode
     memset(root_directory,0x00,BLOCKSIZE);
-    root_directory[0] = '5'
+    root_directory[0] = '3';
     root_directory[1] = MAGIC_NUMBER;
-    root_directory[2] = 0
+    root_directory[2] = 0 // address of directory file extent
  
     err_code = writeBlock(diskNum,1,root_inode);
     if (err_code < 0){
@@ -178,6 +181,7 @@ int tfs_mkfs(char* filename, int nBytes){
         return err_code;
     }
 
+  
     // the disk is set up
     // lets close it for now
     err_code = closeDisk(diskNum);
