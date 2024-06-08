@@ -928,8 +928,110 @@ int tfs_rename(fileDescriptor FD, char* newName)
     return 1;
 }
 
+// returns the inode of this 
+int tfs_createDir(char* dirName){
+    // we want to create a directory if it doesn't exist already
+    char* dirName = (char*)malloc(sizeof(char) * 9);
+    char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
+
+    int err_code;
+    //read from superblock, get curr directory file
+    readBlock(mountedDiskNum,0,read_block);
+    int root_inode = read_block[5];
+    int free_block = read_block[2];
+    readBlock(mountedDiskNum,root_inode,read_block);
+    int cur_directory = read_block[2];
+    readBlock(mountedDiskNum,cur_directory,read_block);
 
 
+    int inode = searchForFile(dirName,read_block,dirName);
+    if (inode < 0){
+        return inode; // invalid diretory or other 
+    }else if (inode == 0){
+         //create directory
+    }else{
+        return inode; // the inode of this directory
+    }
+
+    int dir_inode = getRecentDirectory(path,read_block);
+    if (dir_inode <= 0){
+        dir_inode = cur_directory;// assume its the root 
+    }
+ 
+    // we know have the most recent directory in read_block 
+    readBlock(mountedDiskNum,dir_inode,read_block);
+    // we want to write the filename + inode number to this block
+    // find an empty spot and then write to the directory
+    addFileToBuffer(dirName,read_block,free_block);
+    writeBlock(mountedDiskNum,dir_inode,read_block);
+
+    // directory inode content
+    readBlock(mountedDiskNum,free_block,read_block);
+    read_block[0] = '5';
+    read_block[1] = MAGIC_NUMBER;
+    int next_free = read_block[2] ; // defaults to next free_block - save to superblock
+    read_block[3] = 0;
+    
+    for (i=0;i<8;i++){
+        if (dirName[i] == '\0'){
+            break;
+        }
+        inode_block[4+i] = dirName[i];
+    }   
+    writeBlock(mountedDiskNum,free_block,read_block);
+
+    // write to the superblock
+    readBlock(mountedDiskNum,0,read_block);
+    read_block[2] = next_free;
+    writeBlock(mountedDiskNum,0,read_block);
+    return 0;
+}
+
+int tfs_removeDir(char *dirname)
+{
+    int i, inode;
+    char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
+    char* buffer = (char*)malloc(sizeof(char) * BLOCKSIZE);
+    char* temp_fil = (char*)malloc(sizeof(char) * 9);
+
+    //read from superblock, get curr directory file
+    readBlock(mountedDiskNum,0,read_block);
+    int root_inode = read_block[5];
+    readBlock(mountedDiskNum,root_inode,read_block);
+    int cur_directory = read_block[2];
+    readBlock(mountedDiskNum,cur_directory,read_block);
+
+    //search for directory in root direc and get inode num for it
+    inode = searchForFile(dirname, read_block, temp_fil);
+    readBlock(mountedDiskNum, inode, read_block);
+    //check if it's a directory
+    if (read_block[0] != '5' || read_block[1] != 0x44)
+    {
+        return -1;
+    }
+    //set the buffer to be a free block ready to overwrite the deleted directory block
+    buffer[0] = '4';
+    buffer[1] = 0x44;
+    buffer[2] = read_block[2];
+    //Bytes 4-12 is reserved for directory name
+    for (i = 13; i < BLOCKSIZE; i++)
+    {
+        //error if we somehow reach a non-null character
+        if (read_block[i] != 0x00)
+        {
+            return -1;
+        }
+    }
+    //HAVE TO DELETE DIRECTORY FROM ROOT DIRECTORY SOMEHOW SOMEWAY
+    //if pass through, directory is empty 
+    memset(buffer, 0x00, BLOCKSIZE);
+    writeBlock(mountedDiskNum, inode, buffer);
+
+    free(read_block);
+    free(buffer);
+    free(temp_fil);
+    return 1;
+}
 
 int tfs_seek(fileDescriptor FD, int offset){
 
@@ -1058,6 +1160,8 @@ int main(){
     err = tfs_readByte(fd,buffer);
     printf("%d\n",err);
     tfs_deleteFile(fd);
+
+    createDir("/temp");
     
     tfs_readdir(); 
     tfs_rename(fd2,"tymon");
