@@ -542,50 +542,30 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
     if (node == NULL){
         return -1; 
     }
-    char* filename = node->fileName;
+    char* path = node->fileName;
     int err_code;
-    // search the root inode for the filename
-    err_code = readBlock(mountedDiskNum,0,block);
-    if (err_code < 0){
-        free(block);
-        free(read_block);
-        return err_code;
-    }
-    int root_inode = block[5];
-    err_code = readBlock(mountedDiskNum,root_inode,block);
-    if (err_code < 0){
-        free(block);
-        free(read_block);
-        return err_code;
+    
+    // we want to search the directory for the filename
+    
+    char* filename = malloc(9 * sizeof(char));
+    readBlock(mountedDiskNum,0,read_block);
+    int root_inode = read_block[5];
+    readBlock(mountedDiskNum,root_inode,read_block);
+    int cur_directory = read_block[2];
+    readBlock(mountedDiskNum,cur_directory,read_block);
+    
+    int inode;
+    inode = searchForFile(path,read_block,filename);
+    if (inode < 0){
+        return inode; // invalid diretory or other 
+    }else if (inode = 0){
+        return -4; //cant find filename
     }
 
-    int i=4;
-    int flag;
-    int j;
-    while(i<BLOCKSIZE && block[i] != 0x00){
-        err_code = readBlock(mountedDiskNum,block[i],read_block);
-        if (err_code < 0){
-            free(block);
-            free(read_block);
-            return err_code;
-        }
-        flag = 1;
-        for(j=0;j<8;j++){
-            if (read_block[4+j] == '\0'){
-                break;
-            }
-            if(read_block[4+j] != filename[j]){
-                flag = 0;
-                break; // we didn't get the right inode
-            } 
-        }
-        if (flag){
-            // we've found our file
-            break;
-        } 
-        i++;
-    }
-    if (flag){
+    readBlock(mountedDiskNum,inode,read_block);
+    int file_extent = read_block[2]
+    if (file_extent == 0){
+        // get the next free block
         err_code = readBlock(mountedDiskNum,0,block);
         if (err_code < 0){
             free(block);
@@ -593,66 +573,65 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
             return err_code;
         }
         int free_block = block[2];
-        //lets write to this inodes file extent
+        //lets write to this inodes next
         read_block[2] = free_block;
-        read_block[13] = size;
+        read_block[12] = size % (BLOCKSIZE-4); // size of last block
+        read_block[13] = size / BLOCKSIZE; // number of bytes
+        read_block[14] = 0; // file pointer location
         err_code = writeBlock(mountedDiskNum,i,read_block);
         if (err_code < 0){
             free(block);
             free(read_block);
             return err_code;
         }
-        
-        err_code = readBlock(mountedDiskNum,free_block,block);
-        if (err_code < 0){
-            free(block);
-            free(read_block);
-            return err_code;
-        }
-          
-        // now the rest of the buffer can be
-        for (i=0; i<size; i++){
-            if (i+4 % BLOCKSIZE == 0){
-                block[0] = '3';
-                block[1] = MAGIC_NUMBER;
-                //write this block and set up the next one
-                err_code = writeBlock(mountedDiskNum,free_block,block);
-                if (err_code < 0){
-                    free(block);
-                    free(read_block);
-                    return err_code;
-                }
-               
-                free_block = block[2];
-                err_code = readBlock(mountedDiskNum,free_block,block);
-                if (err_code < 0){
-                    free(block);
-                    free(read_block);
-                    return err_code;
-                }
+    }else{
+        // delete existing blocks
+        // update the inode contents to be correct
+        readBlock(mountedDiskNum,inode,read_block);
+    }
+    // at this point, read_block contain first file extent content
+
+    // now the rest of the buffer can be
+    for (i=0; i<size; i++){
+        if (i+4 % BLOCKSIZE == 0){
+            block[0] = '3';
+            block[1] = MAGIC_NUMBER;
+            //write this block and set up the next one
+            err_code = writeBlock(mountedDiskNum,free_block,block);
+            if (err_code < 0){
+                free(block);
+                free(read_block);
+                return err_code;
             }
-            block[i+4 % BLOCKSIZE] = buffer[i];
+            
+            free_block = block[2];
+            err_code = readBlock(mountedDiskNum,free_block,block);
+            if (err_code < 0){
+                free(block);
+                free(read_block);
+                return err_code;
+            }
         }
+        block[i+4 % BLOCKSIZE] = buffer[i];
+    }
 
-        // set the next free node in the superblock
-        free_block = block[2];
-        err_code = readBlock(mountedDiskNum,0,block);
-        if (err_code < 0){
-            free(block);
-            free(read_block);
-            return err_code;
-        }
-        block[2] = free_block;
-        err_code = writeBlock(mountedDiskNum,0,block);
-        if (err_code < 0){
-            free(block);
-            free(read_block);
-            return err_code;
-        }
+    // set the next free node in the superblock
+    free_block = block[2];
+    err_code = readBlock(mountedDiskNum,0,block);
+    if (err_code < 0){
+        free(block);
+        free(read_block);
+        return err_code;
+    }
+    block[2] = free_block;
+    err_code = writeBlock(mountedDiskNum,0,block);
+    if (err_code < 0){
+        free(block);
+        free(read_block);
+        return err_code;
+    }
 
-        return SUCCESS;
-    } 
-
+    return SUCCESS;
 
 }
 
@@ -674,7 +653,6 @@ int main(){
     fileDescriptor fd = tfs_openFile("/ritvik");
     fileDescriptor fd2 = tfs_openFile("/joel");
     fileDescriptor fd3 = tfs_openFile("/joel");
-    fileDescriptor fd4 = tfs_openFile("/ty");
     char* message = "hi my name is Joel";
     int err = tfs_writeFile(fd,message,sizeof(message));
     printf("%d\n",err);
