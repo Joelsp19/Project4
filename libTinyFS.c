@@ -317,6 +317,26 @@ static int checkDirectory(char* name,char* buffer){
 }
 
 
+static int deleteFileFromDirectory(char* name,char* buffer){
+    int i;
+    int j;
+    char* entry;
+    int len;
+    for (i=4;i<BLOCKSIZE;i+=9){
+        entry = substring(buffer,i,i+8);
+        len = strlen(name);
+        printf("entry %s\n",entry);
+        if (strncmp(name,entry,len) == 0){
+            for(j=0;j<9;j++){
+                buffer[i+j] = 0;
+            }
+            return 1; // returns true if worked
+        }
+    }
+    return -1; //returns -1 if not in directory
+}
+
+
 // return values:
 // if < 0 --> can't find a directory or other error
 // if = 0 --> can't find the filename
@@ -361,6 +381,39 @@ static int searchForFile(char* path, char* root_buffer, char* filename){
         return 0;
     }
 }
+
+
+static int getRecentDirectory(char* path, char* root_buffer){
+    int anchor = 1;
+    int inode;
+    int i;
+    int cur_directory;
+
+    if (path[0] != '/'){
+        return -20;
+    }
+    for (i=1;i<strlen(path);i++){
+        if (path[i] == '/'){
+            //directory name 
+            char* dirName = substring(path,anchor,i);
+            // read the superblock, find the root directory inode
+            inode = checkDirectory(dirName,root_buffer);
+            free(dirName);
+            if (inode != 0){
+                readBlock(mountedDiskNum,inode,root_buffer);
+                cur_directory = root_buffer[2];
+                readBlock(mountedDiskNum,cur_directory,root_buffer);
+                // now read_block has the contents of the directory
+            }else{
+                return -30;
+            }
+            anchor = i+1;
+        }   
+    }
+    return cur_directory;
+}
+
+
 
 static int addFileToBuffer(char* name, char* buffer, int inode){
     int i;
@@ -672,37 +725,42 @@ int tfs_deleteFile(fileDescriptor FD)
     char* write_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
     char* temp_fil = (char*)malloc(sizeof(char) * 9);
 
+    int err_code;
     //read from superblock, get curr directory file
     readBlock(mountedDiskNum,0,read_block);
     int root_inode = read_block[5];
     readBlock(mountedDiskNum,root_inode,read_block);
     int cur_directory = read_block[2];
+    printf("cur directory %d\n", cur_directory);
     readBlock(mountedDiskNum,cur_directory,read_block);
 
     //find inode block based on file descriptor
     Node* fil = findNode(FD);
-    int inode = searchForFile(fil -> fileName, read_block, temp_fil);
+    char* path = fil->fileName;
+    int inode = searchForFile(path, read_block, temp_fil);
 
     //read_block contains inode block for file to delete
-    readBlock(mountedDiskNum, inode, read_block)
+    readBlock(mountedDiskNum, inode, read_block);
 
     int file_extent = read_block[2];
     //will 0 out every node, and make it into a free block
-    memset(buffer, 0x00, BLOCKSIZE);
-    buffer[0] = '4';
-    buffer[1] = MAGIC_NUMBER;
-    buffer[2] = file_extent;
-    writeBlock(mountedDiskNum, inode, buffer);
+    memset(write_block, 0x00, BLOCKSIZE);
+    write_block[0] = '4';
+    write_block[1] = MAGIC_NUMBER;
+    write_block[2] = file_extent;
+    writeBlock(mountedDiskNum, inode, write_block);
     readBlock(mountedDiskNum, file_extent, read_block);
-    tracker = read_block[0];
+    int tracker = read_block[0];
 
-    while (tracker == 3)
+    int prev_extent = inode;
+    while (tracker == '3')
     {
         //keep same link
-        buffer[2] = read_block[2];
+        write_block[2] = read_block[2];
         //write in same file extent, the new buffer
-        writeBlock(mountedDiskNum, file_extent, buffer);
+        writeBlock(mountedDiskNum, file_extent, write_block);
         //update to next file_extent file
+        prev_extent = file_extent;
         file_extent = read_block[2];
         readBlock(mountedDiskNum, file_extent, read_block);
         tracker = read_block[0];
@@ -710,12 +768,42 @@ int tfs_deleteFile(fileDescriptor FD)
 
     //read superblock again and update it to old inode block
     readBlock(mountedDiskNum, 0, read_block);
+    int new_free = read_block[2];
     read_block[2] = inode;
+    writeBlock(mountedDiskNum, 0, read_block);
+    
+    //wewrite the last deleted file to point to what superblock was pointing to
+    readBlock(mountedDiskNum, prev_extent, read_block);
+    read_block[2] = new_free;
+    writeBlock(mountedDiskNum, prev_extent, read_block);
 
     //HAVE TO DELETE IT FROM LAST DIRECTORY STILL
+       
+    readBlock(mountedDiskNum,cur_directory,read_block);
+    int dir_inode = getRecentDirectory(path,read_block);
+    if (dir_inode <= 0){
+        dir_inode = 2;// assume its the root 
+    }
+    printf("%d\n", cur_directory);    
+ 
+    // we know have the most recent directory in read_block 
+    readBlock(mountedDiskNum,dir_inode,read_block);
+    
+    printf("%s\n",temp_fil);
+    err_code = deleteFileFromDirectory(temp_fil,read_block);
+    printf("%d\n", err_code);
+    if (err_code < 0){
+        free(read_block);
+        free(write_block);
+        free(temp_fil);
+        return -1;
+    }
+    writeBlock(mountedDiskNum,dir_inode,read_block); 
+ 
     free(read_block);
     free(write_block);
     free(temp_fil);
+    return 0;
 }
 
 int tfs_readdir()
@@ -723,7 +811,7 @@ int tfs_readdir()
     int i, inode;
     char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
     char* temp_inode_reader = (char*)malloc(sizeof(char) * BLOCKSIZE);
-    char* filename = (char*)malloc(sizeof(char) * 9)
+    char* filename = (char*)malloc(sizeof(char) * 9);
 
     //read from superblock, get curr directory file
     readBlock(mountedDiskNum,0,read_block);
@@ -735,16 +823,21 @@ int tfs_readdir()
     for (i = 4; i < BLOCKSIZE; i += 9)
     {
         filename = substring(read_block, i, i + 8);
-        inode = buffer[i + 8];
+        inode = read_block[i + 9];
         readBlock(mountedDiskNum, inode, temp_inode_reader);
-        if(temp_inode_reader[0] == 2)
+        if(temp_inode_reader[0] == '2')
         {
-            printf(filename"\n");
+            if (filename[0] != '\0'){
+                printf("here");
+                printf("%s\n", filename);
+            }
         }
         else
         {
             //WILL DO SOMETHING DIFFERENT FOR DIRECTORIES
-            printf(filename"\n");
+            if (filename[0] != '\0'){
+                printf("%s\n", filename);
+            }
         }
     }
     free(read_block);
@@ -868,6 +961,7 @@ int main(){
     printf("strlen %d\n", strlen(message));
     int err = tfs_writeFile(fd,message,strlen(message));
     printf("writeFile %d\n",err);
+    tfs_readdir(); 
     
     char* buffer = (char *)malloc(sizeof(char) * 2);
     tfs_readByte(fd,buffer);
@@ -879,6 +973,10 @@ int main(){
     printf("buffer: %s\n",buffer); 
     err = tfs_readByte(fd,buffer);
     printf("%d\n",err);
+    tfs_deleteFile(fd);
+
+    tfs_readdir(); 
+
     tfs_unmount();
     return 0;
 }
