@@ -665,11 +665,78 @@ int tfs_deleteFile(fileDescriptor FD){
 }
 
 int tfs_readByte(fileDescriptor FD, char* buffer){
+    char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
+    char* temp_fil = (char*)malloc(sizeof(char) * 9);
+    int blocksToRead, currByte;
 
+    //read from superblock, get curr directory file
+    readBlock(mountedDiskNum,0,read_block);
+    int root_inode = read_block[5];
+    readBlock(mountedDiskNum,root_inode,read_block);
+    int cur_directory = read_block[2];
+    readBlock(mountedDiskNum,cur_directory,read_block);
+
+    //find filename from filedescriptor and find correct inode file
+    Node* fil = (findNode(FD));
+    if (fil == NULL)
+    {
+         //error
+         return -1;
+    }
+    int inode = searchForFile(fil -> fileName, read_block, temp_fil);
+    //get size of file, file_pointer, and first file_extent from inode 
+    int file_size = read_block[12];
+    int file_pointer = read_block[14];
+    int file_extent = read_block[2];
+
+    if (file_pointer >= file_size)
+    {
+        //error if file pointer past the end of the file
+        return -1;
+    }
+    else
+    {
+        //change file_pointer to += 1 and write it back to disk
+        tfs_seek(FD, file_pointer + 1);
+
+        //if 0-251, 0 blocks, if 252-503, 1 blocks, etc...
+        blocksToRead = (file_pointer - (file_pointer % (BLOCKSIZE-4))) / (BLOCKSIZE-4);
+        currByte = file_pointer % (BLOCKSIZE - 4);
+
+        //find the correct block to read based on blocksToRead
+        while (blocksToRead >= 0)
+        {
+            //now read_block contains next file_extent 
+            readBlock(mountedDiskNum, file_extent, read_block);
+            file_extent = read_block[2]; //next file_extent file if needed
+            blocksToRead = blocksToRead - 1;
+        }
+
+        //copies the current byte pointed by filepointer into buffer?
+        strncpy(buffer, read_block[currByte], 1);
+        //valid af
+        return 1;
+
+    }
 }
 
 int tfs_seek(fileDescriptor FD, int offset){
 
+    char* temp_fil = (char*)malloc(sizeof(char) * 9);
+
+    //read from superblock, get curr directory file
+    readBlock(mountedDiskNum,0,read_block);
+    int root_inode = read_block[5];
+    readBlock(mountedDiskNum,root_inode,read_block);
+    int cur_directory = read_block[2];
+    readBlock(mountedDiskNum,cur_directory,read_block);
+
+    //find filename from filedescriptor and find correct inode file
+    char* filename = (findNode(FD)) -> fileName;
+    int inode = searchForFile(filename, read_block, temp_fil);
+    //set file_pointer to offset
+    read_block[14] = offset;
+    return writeBlock(mountedDiskNum, inode, read_block);
 }
 
 int main(){
