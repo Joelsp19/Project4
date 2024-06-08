@@ -94,6 +94,9 @@ static Node* findNodeFilename(char* filename) {
 
 // libTiny function implementation
 
+
+// this overwrites any existing files
+// with the same name
 int tfs_mkfs(char* filename, int nBytes){
     char* write_block = malloc(BLOCKSIZE * sizeof(char));
     char* super_block = malloc(BLOCKSIZE * sizeof(char));
@@ -147,7 +150,6 @@ int tfs_mkfs(char* filename, int nBytes){
         return err_code;
     }
 
-   
     //set the root_directory_inode
     memset(root_inode,0x00,BLOCKSIZE);
     root_inode[0] = '5';
@@ -302,19 +304,29 @@ static char* substring(char* string, int start, int end){
 
 static int checkDirectory(char* name,char* buffer){
     int i;
+    char* entry;
+    int len;
     for (i=4;i<BLOCKSIZE;i+=9){
-        if (strcmp(name,substring(buffer,i,8)) == 0){
-            return buffer[i+8];
+        entry = substring(buffer,i,i+8);
+        len = strlen(name);
+        if (strncmp(name,entry,2) == 0){
+            return buffer[i+8]; // returns the inode
         }
     }
-    return 0;
+    return 0; //returns 0 if not in directory
 }
 
+
+// return values:
+// if < 0 --> can't find a directory or other error
+// if = 0 --> can't find the filename
+// if > 1 --> this is the inode associated with file
 static int searchForFile(char* path, char* root_buffer, char* filename){
-    
-    char* read_block = root_buffer;
     int anchor = 1;
     int inode;
+    int i;
+    int cur_directory;
+
     if (path[0] != '/'){
         return -20;
     }
@@ -323,11 +335,12 @@ static int searchForFile(char* path, char* root_buffer, char* filename){
             //directory name 
             char* dirName = substring(path,anchor,i);
             // read the superblock, find the root directory inode
-            inode = checkDirectory(dirName,read_block);
+            inode = checkDirectory(dirName,root_buffer);
+            free(dirName);
             if (inode != 0){
-                readBlock(mountedDiskNum,inode,read_block);
-                cur_directory = read_block[2];
-                readBlock(mountedDiskNum,cur_directory,read_block);
+                readBlock(mountedDiskNum,inode,root_buffer);
+                cur_directory = root_buffer[2];
+                readBlock(mountedDiskNum,cur_directory,root_buffer);
                 // now read_block has the contents of the directory
             }else{
                 return -30;
@@ -335,16 +348,17 @@ static int searchForFile(char* path, char* root_buffer, char* filename){
             anchor = i+1;
         }   
     }
-    filename = substring(path,anchor,sizeof(path));
-    printf("filename: %s\n", filename);
+    char* temp = substring(path,anchor,sizeof(path));
+    strncpy(filename,temp,8);
+    free(temp);
     if (sizeof(filename) > 8){
         return -1; //  not a possible filename
     }
-    inode = checkDirectory(filename,read_block);
+    inode = checkDirectory(filename,root_buffer);
     if (inode != 0){
         return inode;
     }else{
-        return -1;
+        return 0;
     }
 }
 
@@ -354,7 +368,7 @@ static int addFileToBuffer(char* name, char* buffer, int inode){
     for (i=4; i<BLOCKSIZE;i+=9){
         if (buffer[i] == '\0'){
             for (j=0;j<8;j++){
-                if (name[i] == '\0'){
+                if (name[j] == '\0'){
                     buffer[i+j] = inode;
                     return 0;
                 }
@@ -366,6 +380,7 @@ static int addFileToBuffer(char* name, char* buffer, int inode){
     }
     // we can't find enough space in current dictionary
     // TO-DO: extend the file extent
+    printf("oopsies");
     return -1;
 }
 
@@ -392,42 +407,18 @@ int addNewFile(char* name){
         free(read_block);
         return -1;
     }
+    
     int root_inode = read_block[5];
     readBlock(mountedDiskNum,root_inode,read_block);
     int cur_directory = read_block[2];
     readBlock(mountedDiskNum,cur_directory,read_block);
-    //now readblock contains root directory file extent
 
-    // int anchor = 1;
-    // if (name[0] != '/'){
-    //     return -20;
-    // }
-    // for (i=1;i<sizeof(name);i++){
-    //     if (name[i] == '/'){
-    //         //directory name 
-    //         char* dirName = substring(name,anchor,i);
-    //         // read the superblock, find the root directory inode
-    //         int inode = checkDirectory(dirName,read_block);
-    //         if (inode != 0){
-    //             readBlock(mountedDiskNum,inode,read_block);
-    //             cur_directory = read_block[2];
-    //             readBlock(mountedDiskNum,cur_directory,read_block);
-    //             // now read_block has the contents of the directory
-    //         }else{
-    //             return -30;
-    //         }
-    //         anchor = i+1;
-    //     }   
-    // }
-    // char* filename = substring(name,anchor,sizeof(name));
-    // printf("filename: %s\n", filename);
-    // if (sizeof(filename) > 8){
-    //     return -1;
-    // }
+    char* filename = (char *)malloc(9*sizeof(char));
+    if (searchForFile(name,read_block,filename) < 0){
+        return -30;
+    }
 
-    char* filename;
-    searchForFile(name,read_block,filename)
-    printf("%s\n",filename);
+    printf("my filename: %s\n",filename);
 
     // for directory implementation we are adding the filename
     // the current directory is in read_block
@@ -494,7 +485,8 @@ fileDescriptor tfs_openFile(char* name){
     // if not there, create
     // if its there
     // save the FD into the linked list
-    char* read_block = malloc(BLOCKSIZE * sizeof(char));
+    int err_code;
+    char* read_block = (char*)malloc(BLOCKSIZE * sizeof(char));
     if (mountedDiskNum == -1){
        return -1; 
     } 
@@ -502,23 +494,31 @@ fileDescriptor tfs_openFile(char* name){
     Node* node = findNodeFilename(name);
     if (node == NULL){
         // create it
-        char* filename;
+        char* filename = malloc(9 * sizeof(char));
         readBlock(mountedDiskNum,0,read_block);
         int root_inode = read_block[5];
         readBlock(mountedDiskNum,root_inode,read_block);
         int cur_directory = read_block[2];
         readBlock(mountedDiskNum,cur_directory,read_block);
-
-        if (searchForFile(name,read_block,filename) < 0){
+        int inode;
+        inode = searchForFile(name,read_block,filename);
+        if (inode < 0){
+            // invalid path name or other error
+            return inode;
+        }else if (inode == 0){
             // add a new file
+            // note that read_block should contain contents of 
+            // the last subdirectory
             fileDescriptor newFd = addNewFile(name);
+            printf("%d\n",newFd);
             if (newFd < 0){
                 return newFd; 
             }
             free(read_block);
             return newFd; 
         }else{
-            // add to openedfiles
+            // add to openedfilesi
+            printf("on disk\n");
             err_code = insert(fdGlobal, name);
             if (err_code < 0){
                 free(read_block);
@@ -529,6 +529,7 @@ fileDescriptor tfs_openFile(char* name){
         }
     }else{
         free(read_block);
+        printf("in list\n");
         return node->FD;
     }
 
@@ -672,6 +673,7 @@ int main(){
     tfs_mount("disk0.dsk");
     fileDescriptor fd = tfs_openFile("/ritvik");
     fileDescriptor fd2 = tfs_openFile("/joel");
+    fileDescriptor fd3 = tfs_openFile("/joel");
     char* message = "hi my name is Joel";
     int err = tfs_writeFile(fd,message,sizeof(message));
     printf("%d\n",err);
