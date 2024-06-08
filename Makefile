@@ -10,7 +10,7 @@ $(PROG): $(OBJS)
 	$(CC) $(CFLAGS) -o $(PROG) $(OBJS)
 
 clean:	
-	rm -f $(OBJS) $(EXTRACLEAN) *~ TAGS
+	rm -f $(OBJS) $(EXTRACLEAN) *.dsk *~ TAGS
 
 diskTest: diskTest.o libDisk.c libDisk.h
 	$(CC) $(CFLAGS) -o diskTest diskTest.o libDisk.c libDisk.h

@@ -330,7 +330,7 @@ static int searchForFile(char* path, char* root_buffer, char* filename){
     if (path[0] != '/'){
         return -20;
     }
-    for (i=1;i<sizeof(path);i++){
+    for (i=1;i<strlen(path);i++){
         if (path[i] == '/'){
             //directory name 
             char* dirName = substring(path,anchor,i);
@@ -348,7 +348,7 @@ static int searchForFile(char* path, char* root_buffer, char* filename){
             anchor = i+1;
         }   
     }
-    char* temp = substring(path,anchor,sizeof(path));
+    char* temp = substring(path,anchor,strlen(path));
     strncpy(filename,temp,8);
     free(temp);
     if (sizeof(filename) > 8){
@@ -674,6 +674,7 @@ int main(){
     fileDescriptor fd = tfs_openFile("/ritvik");
     fileDescriptor fd2 = tfs_openFile("/joel");
     fileDescriptor fd3 = tfs_openFile("/joel");
+    fileDescriptor fd4 = tfs_openFile("/ty");
     char* message = "hi my name is Joel";
     int err = tfs_writeFile(fd,message,sizeof(message));
     printf("%d\n",err);
