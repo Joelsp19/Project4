@@ -152,8 +152,8 @@ int tfs_mkfs(char* filename, int nBytes){
     memset(root_inode,0x00,BLOCKSIZE);
     root_inode[0] = '5';
     root_inode[1] = MAGIC_NUMBER;
-    root_inode[2] = 2 // address of directory file extent
-    root_inode[4] = "/"; // name of directory
+    root_inode[2] = 2; // address of directory file extent
+    root_inode[4] = '/'; // name of directory
 
     root_inode[12] = 0; //size of directory 
 
@@ -161,7 +161,7 @@ int tfs_mkfs(char* filename, int nBytes){
     memset(root_directory,0x00,BLOCKSIZE);
     root_directory[0] = '3';
     root_directory[1] = MAGIC_NUMBER;
-    root_directory[2] = 0 // address of directory file extent
+    root_directory[2] = 0; // address of directory file extent
  
     err_code = writeBlock(diskNum,1,root_inode);
     if (err_code < 0){
