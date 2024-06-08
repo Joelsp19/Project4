@@ -290,6 +290,27 @@ int tfs_unmount(void){
 
 }
 
+static char* substring(char* string, int start, int end){
+    // Copy the substring
+    int len = end-start;
+    char* sub = (char*) malloc(sizeof(char) * (len+1));
+    strncpy(sub, string + start, len);
+    // Null-terminate the substring
+    sub[len] = '\0';
+    return sub;
+}
+
+
+static int checkDirectory(char* name,char* buffer){
+    int i;
+    for (i=4;i<BLOCKSIZE;i+=9){
+        if (strcmp(name,substring(buffer,i,8)) == 0){
+            return buffer[i+8];
+        }
+    }
+    return 0;
+}
+
 
 int addNewFile(char* name){
 
@@ -300,19 +321,50 @@ int addNewFile(char* name){
     memset(inode_block,0x00,BLOCKSIZE);
     inode_block[0] = '2';
     inode_block[1] = MAGIC_NUMBER;
-    inode_block[2] = 0x00;
+    inode_block[2] = 0;
     inode_block[3] = 0x00;  //empty   
     int i;
-    if (sizeof(name) > 8){
+
+    /hello/goodbye/file
+    
+    readBlock(mountedDiskNum,0,read_block);
+    int root_inode = read_block[5];
+    readBlock(mountedDiskNum,root_inode,read_block);
+    int root_directory = read_block[2];
+    readBlock(mountedDiskNum,root_directory,read_block);
+    //now readblock contains root directory file extent
+
+    int anchor = 1;
+    for (i=1;i<sizeof(name);i++){
+        if (name[i] == '/'){
+            //directory name 
+            char* dirName = substring(name,anchor,i);
+            // read the superblock, find the root directory inode
+            int inode = checkDirectory(dirName,read_block);
+            if (inode != 0){
+                readBlock(mountedDiskNum,inode,read_block);
+                root_directory = read_block[2];
+                readBlock(mountedDiskNum,root_directory,read_block);
+                // now read_block has the contents of the directory
+            }else{
+                return -30;
+            }
+            anchor = i+1;
+        }   
+    }
+    char* filename = substring(name,anchor,sizeof(name));
+
+    if (sizeof(filename) > 8){
         return -1;
     }
+
     for (i=0;i<8;i++){
-        if (name[i] == '\0'){
+        if (filename[i] == '\0'){
             break;
         }
         inode_block[4+i] = name[i];
     }   
-    inode_block[13] = 0; 
+    inode_block[12] = 0; // size of the new file
 
     // find free block
     int err_code;
