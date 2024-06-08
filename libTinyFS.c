@@ -309,7 +309,7 @@ static int checkDirectory(char* name,char* buffer){
     for (i=4;i<BLOCKSIZE;i+=9){
         entry = substring(buffer,i,i+8);
         len = strlen(name);
-        if (strncmp(name,entry,2) == 0){
+        if (strncmp(name,entry,len) == 0){
             return buffer[i+8]; // returns the inode
         }
     }
@@ -369,12 +369,11 @@ static int addFileToBuffer(char* name, char* buffer, int inode){
         if (buffer[i] == '\0'){
             for (j=0;j<8;j++){
                 if (name[j] == '\0'){
-                    buffer[i+j] = inode;
-                    return 0;
+                    break;
                 }
                 buffer[i+j] = name[j];  
             }
-            buffer[i+j] = inode; 
+            buffer[i+8] = inode; 
             return 0;
         }
     }
@@ -539,6 +538,9 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
     Node* node = findNode(FD); 
     char* block = (char*)malloc(BLOCKSIZE * sizeof(char));
     char* read_block = (char*)malloc(BLOCKSIZE * sizeof(char));
+    int i;
+    int free_block;
+
     if (node == NULL){
         return -1; 
     }
@@ -558,12 +560,12 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
     inode = searchForFile(path,read_block,filename);
     if (inode < 0){
         return inode; // invalid diretory or other 
-    }else if (inode = 0){
+    }else if (inode == 0){
         return -4; //cant find filename
     }
-
+    printf("%d\n",inode);
     readBlock(mountedDiskNum,inode,read_block);
-    int file_extent = read_block[2]
+    int file_extent = read_block[2];
     if (file_extent == 0){
         // get the next free block
         err_code = readBlock(mountedDiskNum,0,block);
@@ -572,51 +574,74 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
             free(read_block);
             return err_code;
         }
-        int free_block = block[2];
+        free_block = block[2];
+        printf("first free block %d\n",free_block);
         //lets write to this inodes next
         read_block[2] = free_block;
-        read_block[12] = size % (BLOCKSIZE-4); // size of last block
+        //read_block[12] = size % (BLOCKSIZE-4); // size of last block
+        read_block[12] = size;
         read_block[13] = size / BLOCKSIZE; // number of bytes
         read_block[14] = 0; // file pointer location
-        err_code = writeBlock(mountedDiskNum,i,read_block);
+        err_code = writeBlock(mountedDiskNum,inode,read_block);
         if (err_code < 0){
             free(block);
             free(read_block);
             return err_code;
         }
+        readBlock(mountedDiskNum,free_block,read_block);
     }else{
         // delete existing blocks
         // update the inode contents to be correct
         readBlock(mountedDiskNum,inode,read_block);
+        free_block = block[2];
+        readBlock(mountedDiskNum,free_block,read_block);
     }
     // at this point, read_block contain first file extent content
 
+    int next_block = read_block[2];
+
     // now the rest of the buffer can be
+    int j=1;
     for (i=0; i<size; i++){
-        if (i+4 % BLOCKSIZE == 0){
-            block[0] = '3';
-            block[1] = MAGIC_NUMBER;
+        if ((i+4*j) % BLOCKSIZE == 0){
+            read_block[0] = '3';
+            read_block[1] = MAGIC_NUMBER;
             //write this block and set up the next one
-            err_code = writeBlock(mountedDiskNum,free_block,block);
+            err_code = writeBlock(mountedDiskNum,free_block,read_block);
             if (err_code < 0){
                 free(block);
                 free(read_block);
                 return err_code;
             }
             
-            free_block = block[2];
-            err_code = readBlock(mountedDiskNum,free_block,block);
+            free_block = next_block;
+            printf("free block %d\n", free_block);
+            err_code = readBlock(mountedDiskNum,free_block,read_block);
             if (err_code < 0){
                 free(block);
                 free(read_block);
                 return err_code;
             }
+            next_block = read_block[2];
+            j+=1;
         }
-        block[i+4 % BLOCKSIZE] = buffer[i];
+        read_block[(i+4*j) % BLOCKSIZE] = buffer[i];
     }
 
+    // write the last block
+    block[0] = '3';
+    block[1] = MAGIC_NUMBER;
+    //write this block and set up the next one
+    err_code = writeBlock(mountedDiskNum,free_block,read_block);
+    if (err_code < 0){
+        free(block);
+        free(read_block);
+        return err_code;
+    }
+    
+    free_block = read_block[2];
+    
     // set the next free node in the superblock
-    free_block = block[2];
     err_code = readBlock(mountedDiskNum,0,block);
     if (err_code < 0){
         free(block);
@@ -653,8 +678,8 @@ int main(){
     fileDescriptor fd = tfs_openFile("/ritvik");
     fileDescriptor fd2 = tfs_openFile("/joel");
     fileDescriptor fd3 = tfs_openFile("/joel");
-    char* message = "hi my name is Joel";
-    int err = tfs_writeFile(fd,message,sizeof(message));
+    char* message = "hi my name is Joel. Tymon is an asshole! What does life mean? Computer Science is the worst major in the world!AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    int err = tfs_writeFile(fd,message,strlen(message));
     printf("%d\n",err);
     tfs_unmount();
     return 0;
