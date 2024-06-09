@@ -1,0 +1,23 @@
+Authors : Joel Puthankalam, Ritvik Durgempudi, Tymon Vu
+Written in C
+
+Project is fully functional for the most part
+
+- There are a couple bugs when it comes to 
+hierarchical directories such as removing/removing all
+
+- We attempted to implement:
+	- filesystems
+	- mount verification
+	- readdir and renaming files
+
+Other basic stuff:
+- We used linked list allocation for free blocks
+- We also used linked list alloation to get from file extent to file extent
+- Directory inodes are represented as '5'
+
+Instructions to Run Demo
+make
+./tinyFSDemo
+
+
