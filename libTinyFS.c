@@ -716,7 +716,6 @@ fileDescriptor tfs_openFile(char* name){
         }
     }else{
         free(read_block);
-        free(filename);
         return node->FD;
     }
 

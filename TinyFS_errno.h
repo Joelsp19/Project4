@@ -23,7 +23,6 @@
 #define ERR_DIRECTORY_FULL -19
 #define ERR_FILE_EXISTS -20
 #define ERR_FILE_UNOPEN -21
-#define ERR_NO_FILE -22
 #define ERR_PAST_EOF -23
 
 #define ERR_DISK_FULL -35
