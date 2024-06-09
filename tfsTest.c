@@ -29,8 +29,7 @@ fillBufferWithPhrase (char *inPhrase, char *Buffer, int size)
 }
 
 /* This program will create 2 files (of sizes 200 and 1000) to be read from or stored in the TinyFS file system. */
-int
-main ()
+int main ()
 {
   char readBuffer;
   char *afileContent, *bfileContent;	/* buffers to store file content */
@@ -78,8 +77,9 @@ main ()
 /* read or write files to TinyFS */
 
 
-  aFD = tfs_openFile ("afile");
+  aFD = tfs_openFile ("/afile");
 
+  printf("%d\n",aFD);
   if (aFD < 0)
     {
       perror ("tfs_openFile failed on afile");
@@ -127,7 +127,7 @@ main ()
     }
 
 /* now bfile tests */
-  bFD = tfs_openFile ("bfile");
+  bFD = tfs_openFile ("/bfile");
 
   if (bFD < 0)
     {

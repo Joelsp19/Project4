@@ -1197,7 +1197,7 @@ int tfs_readByte(fileDescriptor FD, char* buffer){
     }
 }
 
-
+/*
 int main(){
     printf("%d\n",tfs_mkfs("disk0.dsk",2562));
     tfs_mount("disk0.dsk");
@@ -1234,3 +1234,4 @@ int main(){
     tfs_unmount();
     return 0;
 }
+*/
