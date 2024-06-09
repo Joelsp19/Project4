@@ -4,19 +4,13 @@ PROG = tinyFSDemo
 OBJS = tinyFSDemo.o libTinyFS.o libDisk.o diskTest.o
 EXTRACLEAN = tinyFSDemo libDisk diskTest
 
-all: testfile diskTest libTinyFS
+all: diskTest libTinyFS
 
 $(PROG): $(OBJS)
 	$(CC) $(CFLAGS) -o $(PROG) $(OBJS)
 
 clean:	
 	rm -f $(OBJS) $(EXTRACLEAN) *.dsk *~ TAGS
-
-testfile: testfile.o libTinyFS.c libDisk.c libDisk.h
-	$(CC) $(CFLAGS) -o testfile testfile.o libTinyFS.c libTinyFS.h libDisk.c libDisk.h
-
-testfile.o: tfsTest.c libTinyFS.c libDisk.c libDisk.h
-	$(CC) $(CFLAGS) -c -o $@ $<
 
 diskTest: diskTest.o libDisk.c libDisk.h
 	$(CC) $(CFLAGS) -o diskTest diskTest.o libDisk.c libDisk.h

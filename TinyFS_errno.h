@@ -14,3 +14,6 @@
 
 #define ERR_INVALID_TINYFS -13 
 #define ERR_DISK_MOUNTED -14
+
+
+#define ERR_DISK_FULL -35
