@@ -208,7 +208,6 @@ int tfs_mkfs(char* filename, int nBytes){
     free(root_inode);
     return SUCCESS;
 }
-
 int tfs_mount(char* diskname){
     // check if file is a disk
     // check if a disk is already mounted
@@ -237,6 +236,43 @@ int tfs_mount(char* diskname){
         free(read_block);
         return ERR_INVALID_TINYFS; 
     }
+
+    //get free list
+    char* read_block_fl = malloc(BLOCKSIZE * sizeof(char));
+    int MAX_BLOCKS = read_block[6];
+    int* free_list = malloc(MAX_BLOCKS * sizeof(int));
+
+    //setting up list of free blocks
+    int k;
+    for(k = 0; k < MAX_BLOCKS; k++){
+        free_list[k] = -1;
+    }
+    
+    //All the stuff for the first free block
+    k = 0;
+    int next_free_block = read_block[2]; //inital next free block 
+    //printf("first block free %d\n", next_free_block);
+    free_list[k] = next_free_block; // adds the next free block to the list
+    k++;
+
+    while(next_free_block > 0){
+        //printf("here: %d\n", next_free_block);
+        err_code = readBlock(diskNum, next_free_block, read_block_fl); // reads the next free block
+        if(err_code < 0 || read_block_fl[2] == 0){
+            free(read_block_fl);
+            break;
+        }
+        //printf("read block free: %d\n", read_block_fl[2]);
+        next_free_block = read_block_fl[2]; // sets new free block 
+        free_list[k] = next_free_block; // adds the next free block to the list
+        k++;
+    }
+
+    int j;
+    for(j = 0; j <  MAX_BLOCKS; j++){
+        printf("freeblock: %d\n", free_list[j]);
+    }
+
     //validate all the blocks
     int numBlocks = read_block[6];
     printf("numblocks: %d\n", numBlocks);
@@ -252,6 +288,36 @@ int tfs_mount(char* diskname){
             free(read_block);
             return ERR_INVALID_TINYFS; 
         }
+
+        if(read_block[0] == '4'){
+            // if node is free but not in free list
+            int found = 0;
+            int j;
+            for(j = 0; j <  MAX_BLOCKS; j++){
+                if (free_list[j] == i){
+                    found = 1;
+                } 
+            } 
+            if(found != 1){
+                printf("free node not in list \n");
+                return ERR_INVALID_TINYFS; 
+            }
+        } else {
+            // checks if a non free node is in the free list
+            int found = 0;
+            int j;
+            for(j = 0; j < MAX_BLOCKS; j++){
+                if(free_list[j] == i){
+                    found = 1;
+                }
+            }
+
+            if(found){
+                printf("Non free node found in list \n");
+                return ERR_INVALID_TINYFS;
+            }
+        }
+
     }
     // ok now we know the disk size
     // reopen disk for writing
