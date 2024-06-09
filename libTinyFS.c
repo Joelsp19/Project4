@@ -87,6 +87,7 @@ static int modifyFilename(fileDescriptor fd, char* newFileName){
     }else{
         n->fileName = newFileName;
     } 
+    return 0;
 }
 
 static Node* findNodeFilename(char* filename) {
@@ -305,7 +306,7 @@ int tfs_mount(char* diskname){
                 } 
             } 
             if(found != 1){
-                printf("free node not in list \n");
+                printf("%d free node not in list \n",i);
                 return ERR_INVALID_TINYFS; 
             }
         } else {
@@ -1031,10 +1032,7 @@ static int readdir_helper(int cur_directory, int tab)
 
 int tfs_readdir()
 {
-    int i, inode;
     char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
-    char* temp_inode_reader = (char*)malloc(sizeof(char) * BLOCKSIZE);
-    char* filename = (char*)malloc(sizeof(char) * 9);
 
     //read from superblock, get curr directory file
     readBlock(mountedDiskNum,0,read_block);
@@ -1045,33 +1043,8 @@ int tfs_readdir()
         return ERR_DISK_FULL;
     }
     readdir_helper(cur_directory,0);
-    printf("here\n");
-  /*
-    readBlock(mountedDiskNum,cur_directory,read_block);
-
-    for (i = 4; i < BLOCKSIZE; i += 9)
-    {
-        filename = substring(read_block, i, i + 8);
-        inode = read_block[i + 8];
-        readBlock(mountedDiskNum, inode, temp_inode_reader);
-        if(temp_inode_reader[0] == '2')
-        {
-            if (filename[0] != '\0'){
-                printf("%s\n", filename);
-            }
-        }
-        else
-        {
-            //WILL DO SOMETHING DIFFERENT FOR DIRECTORIES
-            if (filename[0] != '\0'){
-                printf("d: %s\n", filename);
-            }
-        }
-    }
-*/
+    
     free(read_block);
-    free(temp_inode_reader);
-    free(filename);
     return 1;
 
 }
@@ -1124,8 +1097,7 @@ int tfs_rename(fileDescriptor FD, char* newName)
     newPath[i+k+1] = '\0';
     
     modifyFilename(FD, newPath);
-    free(newPath);
- 
+      
     //retrieve inode block and change the name within the inode block
     int inode = searchForFile(path, read_block, temp_fil);
     if (inode < 0){
@@ -1181,7 +1153,6 @@ int tfs_createDir(char* dirPath){
     char* dirName = (char*)malloc(sizeof(char) * 9);
     char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
 
-    int err_code;
     //read from superblock, get curr directory file
     readBlock(mountedDiskNum,0,read_block);
     int root_inode = read_block[5];
@@ -1429,7 +1400,7 @@ int tfs_readByte(fileDescriptor FD, char* buffer){
     }
 }
 
-
+/*
 int main(){
     printf("%d\n",tfs_mkfs("disk0.dsk",25620));
     tfs_mount("disk0.dsk");
@@ -1470,4 +1441,4 @@ int main(){
     tfs_unmount();
     return 0;
 }
-
+*/

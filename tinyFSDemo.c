@@ -31,12 +31,12 @@ int fillBufferWithPhrase (char *inPhrase, char *Buffer, int size)
 int main ()
 {
   char readBuffer;
-  char *afileContent, *bfileContent, *cfileContent;	/* buffers to store file content */
+  char *afileContent, *bfileContent, *cfileContent, *dfileContent, *efileContent;	/* buffers to store file content */
   int afileSize = 200;		/* sizes in bytes */
   int bfileSize = 1000;
   int cfileSize = 3000;
-  int dFileSize = 200;
-  int eFileSize = 200;
+  int dfileSize = 200;
+  int efileSize = 200;
 
   char phrase1[] = "hello world from (a) file ";
   char phrase2[] = "(b) file content ";
@@ -45,7 +45,6 @@ int main ()
   char phrase5[] = "directory file 2";
 
   fileDescriptor aFD, bFD, cFD, dFD, eFD;
-  int i, returnValue;
 
 /* try to mount the disk */
   if (tfs_mount (DEFAULT_DISK_NAME) < 0)	/* if mount fails */
@@ -54,7 +53,7 @@ int main ()
       if (tfs_mount (DEFAULT_DISK_NAME) < 0)	/* if we still can't open it... */
 	{
 	  perror ("failed to open disk");	/* then just exit */
-	  return;
+	  return -1;
 	}
     }
 
@@ -63,35 +62,35 @@ int main ()
   if (fillBufferWithPhrase (phrase1, afileContent, afileSize) < 0)
     {
       perror ("failed");
-      return;
+      return -1;
     }
 
   bfileContent = (char *) malloc (bfileSize * sizeof (char));
   if (fillBufferWithPhrase (phrase2, bfileContent, bfileSize) < 0)
     {
       perror ("failed");
-      return;
+      return -1;
     }
 
   cfileContent = (char *) malloc (cfileSize * sizeof (char));
   if (fillBufferWithPhrase (phrase3, cfileContent, cfileSize) < 0)
     {
       perror ("failed");
-      return;
+      return -1;
     }
 
   dfileContent = (char *) malloc (dfileSize * sizeof (char));
   if (fillBufferWithPhrase (phrase4, dfileContent, dfileSize) < 0)
     {
       perror ("failed");
-      return;
+      return -1;
     }
 
   efileContent = (char *) malloc (efileSize * sizeof (char));
   if (fillBufferWithPhrase (phrase5, efileContent, efileSize) < 0)
     {
       perror ("failed");
-      return;
+      return -1;
     }
 
 /* print content of files for debugging */
@@ -206,7 +205,12 @@ int main ()
     printf("\nnow testing tfs_readdir(), should print out afile, bfile, and cfile\n");
     tfs_readdir();
     printf("\ntesting rename for bfile to Bfile\n");
-    if (tfs_rename(bFD, "/Bfile") > 0)
+    if (tfs_rename(bFD, "Bfile") > 0)
+    {
+        printf("Renaming successful\n");
+        tfs_readdir();
+    }
+    if (tfs_rename(cFD, "Cfile") > 0)
     {
         printf("Renaming successful\n");
         tfs_readdir();
@@ -262,6 +266,8 @@ int main ()
 	printf ("%c", readBuffer);
     }
 
+    tfs_deleteFile(aFD);
+
     printf("\nTesting contents of root directory, should contain Bfile, cfile, texting, /testing/dFile, /testing/eFile\n");
     tfs_readdir();
 
@@ -270,7 +276,7 @@ int main ()
     tfs_deleteFile(dFD);
     tfs_deleteFile(eFD);
 
-    printf("\nShould be completely empty root directory when calling tfs_readdir()\n");
+    printf("\nShould be completely empty root directory with only testing subdirectory when calling tfs_readdir()\n");
     tfs_readdir();
 
 /* Free both content buffers */

@@ -17,3 +17,4 @@ extern int tfs_readdir();
 extern int tfs_removeAll(char *dirname);
 extern int tfs_removeDir(char *dirname);
 extern int tfs_createDir(char *dirname);
+extern int tfs_rename(fileDescriptor fd, char* newName);
