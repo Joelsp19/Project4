@@ -61,7 +61,7 @@ static int deleteNode(fileDescriptor fd){
         temp = temp->next;
     }
 
-    if (temp == NULL) return -1;   
+    if (temp == NULL) return ERR_NO_FILE;   
 
     prev->next = temp->next;
     free(temp);
@@ -83,7 +83,7 @@ static Node* findNode(fileDescriptor fd) {
 static int modifyFilename(fileDescriptor fd, char* newFileName){
     Node* n = findNode(fd);
     if (n == NULL){
-        return -1;
+        return ERR_NO_FILE;
     }else{
         n->fileName = newFileName;
     } 
@@ -125,7 +125,7 @@ int tfs_mkfs(char* filename, int nBytes){
     int i;
     int numBlocks = ((nBytes - (nBytes % BLOCKSIZE)) / BLOCKSIZE);
     if (numBlocks < 2){
-        return -1;
+        return ERR_DISK_SMALL;
     }
     for (i=0; i<numBlocks; i++){
         if (i == numBlocks-1){
@@ -210,24 +210,20 @@ int tfs_mkfs(char* filename, int nBytes){
     return SUCCESS;
 }
 int tfs_mount(char* diskname){
-    // check if file is a disk
-    // check if a disk is already mounted
-    // check if we have the right format
-    // 1st block is superblock
-    // all blocks have the magic number
-    
+    char* read_block = malloc(BLOCKSIZE * sizeof(char));
+    int diskNum; 
+    int err_code;
+
     if (mountedDiskNum != -1){
         return ERR_DISK_MOUNTED;
     }    
-    char* read_block = malloc(BLOCKSIZE * sizeof(char));
 
-    int diskNum; 
     diskNum = openDisk(diskname, 0); 
     if (diskNum < 0){
+        free(read_block);
         return diskNum;
     }
     //lets read the superblock
-    int err_code;
     err_code = readBlock(diskNum,0,read_block);
     if (err_code < 0){
         free(read_block);
@@ -253,14 +249,13 @@ int tfs_mount(char* diskname){
     k = 0;
     int next_free_block = read_block[2]; //inital next free block
     if(next_free_block == 0){
+        free(read_block);
         return ERR_DISK_FULL;
     }
-    //printf("first block free %d\n", next_free_block);
     free_list[k] = next_free_block; // adds the next free block to the list
     k++;
 
     while(next_free_block > 0){
-        //printf("here: %d\n", next_free_block);
         err_code = readBlock(diskNum, next_free_block, read_block_fl); // reads the next free block
         if(err_code < 0 || read_block_fl[2] == 0){
             free(read_block_fl);
@@ -269,6 +264,7 @@ int tfs_mount(char* diskname){
         //printf("read block free: %d\n", read_block_fl[2]);
         next_free_block = read_block_fl[2]; // sets new free block 
         if(next_free_block == 0){
+            free(read_block);
             return ERR_DISK_FULL;
         }
         free_list[k] = next_free_block; // adds the next free block to the list
@@ -282,7 +278,6 @@ int tfs_mount(char* diskname){
     */
     //validate all the blocks
     int numBlocks = read_block[6];
-   // printf("numblocks: %d\n", numBlocks);
     int i;
     for (i=1;i<numBlocks;i++){
         err_code = readBlock(diskNum,i,read_block);
@@ -394,6 +389,7 @@ static int checkDirectory(char* name,char* buffer){
         if (strncmp(name,entry,len) == 0){
             return buffer[i+8]; // returns the inode
         }
+        free(entry);
     }
     return 0; //returns 0 if not in directory
 }
@@ -424,18 +420,20 @@ static int modifyFileFromDirectory(char* name,char* buffer,char* newContent){
                         buffer[i+j] = 0;
                     }
                 }
-            }   
+            } 
+            free(entry);  
             return 1; // returns true if worked
         }
     }
-    return -1; //returns -1 if not in directory
+    free(entry);
+    return ERR_NOT_IN_DIR; //returns -1 if not in directory
 }
 
 
 // return values:
 // if < 0 --> can't find a directory or other error
 // if = 0 --> can't find the filename
-// if > 1 --> this is the inode associated with file
+// if > 0 --> this is the inode associated with file
 static int searchForFile(char* path, char* root_buffer, char* filename){
     int anchor = 1;
     int inode;
@@ -443,7 +441,7 @@ static int searchForFile(char* path, char* root_buffer, char* filename){
     int cur_directory;
 
     if (path[0] != '/'){
-        return -20;
+        return ERR_INVALID_PATH;
     }
     for (i=1;i<strlen(path);i++){
         if (path[i] == '/'){
@@ -460,7 +458,7 @@ static int searchForFile(char* path, char* root_buffer, char* filename){
                 readBlock(mountedDiskNum,cur_directory,root_buffer);
                 // now read_block has the contents of the directory
             }else{
-                return -32;
+                return ERR_INVALID_PATH;
             }
             anchor = i+1;
         }   
@@ -469,7 +467,7 @@ static int searchForFile(char* path, char* root_buffer, char* filename){
     strncpy(filename,temp,8);
     free(temp);
     if (sizeof(filename) > 8){
-        return -1; //  not a possible filename
+        return ERR_FILENAME_BIG; //  not a possible filename
     }
     inode = checkDirectory(filename,root_buffer);
     if (inode != 0){
@@ -487,7 +485,7 @@ static int getRecentDirectory(char* path, char* root_buffer){
     int cur_directory = 0;
     char* dirName;
     if (path[0] != '/'){
-        return -20;
+        return ERR_INVALID_PATH;
     }
     for (i=1;i<strlen(path);i++){
         if (path[i] == '/'){
@@ -504,7 +502,7 @@ static int getRecentDirectory(char* path, char* root_buffer){
                 readBlock(mountedDiskNum,cur_directory,root_buffer);
                 // now read_block has the contents of the directory
             }else{
-                return -31;
+                return ERR_INVALID_PATH;
             }
             anchor = i+1;
         }   
@@ -531,8 +529,9 @@ static int addFileToBuffer(char* name, char* buffer, int inode){
     }
     // we can't find enough space in current dictionary
     // TO-DO: extend the file extent
-    printf("oopsies");
-    return -1;
+    // as of now our directories don't grow yet
+    printf("oopsies - directory ran out of space");
+    return ERR_DIRECTORY_FULL;
 }
 
 int addNewFile(char* name){
@@ -556,7 +555,7 @@ int addNewFile(char* name){
     if (freeBlock == 0){
         free(inode_block);
         free(read_block);
-        return -1;
+        return ERR_DISK_FULL;
     }
     
     int root_inode = read_block[5];
@@ -565,20 +564,24 @@ int addNewFile(char* name){
     if (cur_directory == 0){
         free(inode_block);
         free(read_block);
-        return -1;
+        return ERR_DISK_FULL;
     }
     readBlock(mountedDiskNum,cur_directory,read_block);
     int subDir;
     char* filename = (char *)malloc(9*sizeof(char));
     int inode = searchForFile(name,read_block,filename);
     if(inode < 0){
-        return -30;
+        free(inode_block);
+        free(read_block);
+        return inode;
     }else if (inode == 0){
         readBlock(mountedDiskNum,cur_directory,read_block);
         int dir_block = getRecentDirectory(name,read_block); 
         if (dir_block == 0){
             subDir = cur_directory;
         }else if (dir_block< 0){
+            free(inode_block);
+            free(read_block);
             return dir_block;
         }else{
             //readBlock(mountedDiskNum,dir_inode,read_block);
@@ -586,7 +589,7 @@ int addNewFile(char* name){
             subDir = dir_block;
         }   
     }else{
-       return -1; 
+       return ERR_FILE_EXISTS; 
     }   
 
     // for directory implementation we are adding the filename
@@ -615,7 +618,7 @@ int addNewFile(char* name){
     if (nextBlock == 0){
         free(inode_block);
         free(read_block);
-        return -1;
+        return ERR_DISK_FULL;
     }
 
     
@@ -665,7 +668,7 @@ fileDescriptor tfs_openFile(char* name){
     int err_code;
     char* read_block = (char*)malloc(BLOCKSIZE * sizeof(char));
     if (mountedDiskNum == -1){
-       return -1; 
+       return ERR_DISK_MOUNTED; 
     } 
     // check our table
     Node* node = findNodeFilename(name);
@@ -678,13 +681,16 @@ fileDescriptor tfs_openFile(char* name){
         int cur_directory = read_block[2];
         if (cur_directory == 0){
             free(read_block);
-            return -1;
+            free(filename);
+            return ERR_DISK_FULL;
         }
         readBlock(mountedDiskNum,cur_directory,read_block);
         int inode;
         inode = searchForFile(name,read_block,filename);
         if (inode < 0){
             // invalid path name or other error
+            free(read_block);
+            free(filename);
             return inode;
         }else if (inode == 0){
             // add a new file
@@ -695,6 +701,7 @@ fileDescriptor tfs_openFile(char* name){
                 return newFd; 
             }
             free(read_block);
+            free(filename);
             return newFd; 
         }else{
             // add to openedfilesi
@@ -704,10 +711,12 @@ fileDescriptor tfs_openFile(char* name){
                 return err_code;
             }
             free(read_block);
+            free(filename);
             return fdGlobal++;
         }
     }else{
         free(read_block);
+        free(filename);
         return node->FD;
     }
 
@@ -721,7 +730,7 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
     int free_block;
 
     if (node == NULL){
-        return -1; 
+        return ERR_FILE_UNOPEN; 
     }
     char* path = node->fileName;
     int err_code;
@@ -735,16 +744,24 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
     int cur_directory = read_block[2];
     if (cur_directory == 0){
         free(read_block);
-        return -1;
+        free(block);
+        free(filename);
+        return ERR_DISK_FULL;
     }
     readBlock(mountedDiskNum,cur_directory,read_block);
     
     int inode;
     inode = searchForFile(path,read_block,filename);
     if (inode < 0){
+        free(read_block);
+        free(block);
+        free(filename);
         return inode; // invalid diretory or other 
     }else if (inode == 0){
-        return -4; //cant find filename
+        free(read_block);
+        free(block);
+        free(filename);
+        return ERR_NO_FILE; //cant find filename
     }
     readBlock(mountedDiskNum,inode,read_block);
     int file_extent = read_block[2];
@@ -752,8 +769,9 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
         // get the next free block
         err_code = readBlock(mountedDiskNum,0,block);
         if (err_code < 0){
-            free(block);
             free(read_block);
+            free(block);
+            free(filename);
             return err_code;
         }
         free_block = block[2];
@@ -769,8 +787,9 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
         read_block[15] = 0; // cur block file pointer
         err_code = writeBlock(mountedDiskNum,inode,read_block);
         if (err_code < 0){
-            free(block);
             free(read_block);
+            free(block);
+            free(filename);
             return err_code;
         }
         readBlock(mountedDiskNum,free_block,read_block);
@@ -819,16 +838,18 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
             //write this block and set up the next one
             err_code = writeBlock(mountedDiskNum,free_block,read_block);
             if (err_code < 0){
-                free(block);
                 free(read_block);
+                free(block);
+                free(filename);
                 return err_code;
             }
             
             free_block = next_block;
             err_code = readBlock(mountedDiskNum,free_block,read_block);
             if (err_code < 0){
-                free(block);
                 free(read_block);
+                free(block);
+                free(filename);
                 return err_code;
             }
             next_block = read_block[2];
@@ -846,8 +867,9 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
     //write this block and set up the next one
     err_code = writeBlock(mountedDiskNum,free_block,read_block);
     if (err_code < 0){
-        free(block);
         free(read_block);
+        free(block);
+        free(filename);
         return err_code;
     }
     
@@ -859,19 +881,24 @@ int tfs_writeFile(fileDescriptor FD, char* buffer, int size){
     // set the next free node in the superblock
     err_code = readBlock(mountedDiskNum,0,block);
     if (err_code < 0){
-        free(block);
         free(read_block);
+        free(block);
+        free(filename);
         return err_code;
     }
     block[2] = free_block;
     
     err_code = writeBlock(mountedDiskNum,0,block);
     if (err_code < 0){
-        free(block);
         free(read_block);
+        free(block);
+        free(filename);
         return err_code;
     }
-
+    
+    free(read_block);
+    free(block);
+    free(filename);
     return SUCCESS;
 
 }
@@ -889,6 +916,9 @@ int tfs_deleteFile(fileDescriptor FD)
     readBlock(mountedDiskNum,root_inode,read_block);
     int cur_directory = read_block[2];
     if (cur_directory== 0){
+        free(read_block);
+        free(write_block);
+        free(temp_fil);
         return ERR_DISK_FULL;
     }
     readBlock(mountedDiskNum,cur_directory,read_block);
@@ -896,7 +926,10 @@ int tfs_deleteFile(fileDescriptor FD)
     //find inode block based on file descriptor
     Node* fil = findNode(FD);
     if (fil == NULL){
-        return -2;
+        free(read_block);
+        free(write_block);
+        free(temp_fil);
+        return ERR_NO_FILE;
     }
     char* path = fil->fileName;
     int inode = searchForFile(path, read_block, temp_fil);
@@ -906,6 +939,9 @@ int tfs_deleteFile(fileDescriptor FD)
 
     int file_extent = read_block[2];
     if (file_extent == 0){
+        free(read_block);
+        free(write_block);
+        free(temp_fil);
         return ERR_DISK_FULL;
     }
     
@@ -936,6 +972,9 @@ int tfs_deleteFile(fileDescriptor FD)
     readBlock(mountedDiskNum, 0, read_block);
     int new_free = read_block[2];
     if (new_free == 0){
+        free(read_block);
+        free(write_block);
+        free(temp_fil);
         return ERR_DISK_FULL;
     }
     
@@ -963,7 +1002,7 @@ int tfs_deleteFile(fileDescriptor FD)
         free(read_block);
         free(write_block);
         free(temp_fil);
-        return -1;
+        return err_code;
     }
     writeBlock(mountedDiskNum,dir_inode,read_block); 
  
@@ -1053,7 +1092,7 @@ int tfs_rename(fileDescriptor FD, char* newName)
 {
     if (strlen(newName) > 8)
     {
-        return -1;
+        return ERR_FILENAME_BIG;
     }
     int i;
     int err_code;
@@ -1066,6 +1105,8 @@ int tfs_rename(fileDescriptor FD, char* newName)
     readBlock(mountedDiskNum,root_inode,read_block);
     int cur_directory = read_block[2];
     if (cur_directory == 0){
+        free(read_block);
+        free(temp_fil);
         return ERR_DISK_FULL;
     }
     readBlock(mountedDiskNum,cur_directory,read_block);
@@ -1074,7 +1115,9 @@ int tfs_rename(fileDescriptor FD, char* newName)
     Node* fil = findNode(FD);
     if (fil == NULL)
     {
-        return -1;
+        free(read_block);
+        free(temp_fil);
+        return ERR_NO_FILE;
     }
 
     
@@ -1101,9 +1144,13 @@ int tfs_rename(fileDescriptor FD, char* newName)
     //retrieve inode block and change the name within the inode block
     int inode = searchForFile(path, read_block, temp_fil);
     if (inode < 0){
+        free(read_block);
+        free(temp_fil);
         return inode; // invalid diretory or other 
     }else if (inode == 0){
-        return -20;
+        free(read_block);
+        free(temp_fil);
+        return ERR_NO_FILE;
     }
     
     readBlock(mountedDiskNum, inode, read_block);
@@ -1138,7 +1185,7 @@ int tfs_rename(fileDescriptor FD, char* newName)
     if (err_code < 0){
         free(read_block);
         free(temp_fil);
-        return -1;
+        return err_code;
     }
     writeBlock(mountedDiskNum,dir_inode,read_block);
 
@@ -1158,11 +1205,15 @@ int tfs_createDir(char* dirPath){
     int root_inode = read_block[5];
     int free_block = read_block[2];
     if (free_block == 0){
+        free(dirName);
+        free(read_block);
         return ERR_DISK_FULL;
     }
     readBlock(mountedDiskNum,root_inode,read_block);
     int cur_directory = read_block[2];
     if (cur_directory == 0){
+        free(dirName);
+        free(read_block);
         return ERR_DISK_FULL;
     }
     readBlock(mountedDiskNum,cur_directory,read_block);
@@ -1170,10 +1221,14 @@ int tfs_createDir(char* dirPath){
 
     int inode = searchForFile(dirPath,read_block,dirName);
     if (inode < 0){
+        free(dirName);
+        free(read_block);
         return inode; // invalid diretory or other 
     }else if (inode == 0){
          //create directory
     }else{
+        free(dirName);
+        free(read_block);
         return inode; // the inode of this directory
     }
 
@@ -1182,15 +1237,11 @@ int tfs_createDir(char* dirPath){
     if (dir_inode == 0){
         dir_inode = cur_directory;// assume its the root 
     }else if(dir_inode < 0){
+        free(dirName);
+        free(read_block);
         return dir_inode;
     }
-/* 
-    readBlock(mountedDiskNum,dir_inode,read_block); 
-    int dir_block = read_block[2];  
-    if (dir_block == 0){
-        return ERR_DISK_FULL;
-    }
-*/
+
     readBlock(mountedDiskNum,dir_inode,read_block);
     // we know have the most recent directory in read_block
     
@@ -1205,6 +1256,8 @@ int tfs_createDir(char* dirPath){
     read_block[1] = MAGIC_NUMBER;
     int next_free = read_block[2] ; // defaults to next free_block - use for the directory content
     if (next_free == 0){
+        free(dirName);
+        free(read_block);
         return ERR_DISK_FULL;
     }
     read_block[3] = 0;
@@ -1225,6 +1278,8 @@ int tfs_createDir(char* dirPath){
     read_block[1] = MAGIC_NUMBER;
     next_free = read_block[2] ; // defaults to next free_block - save to superblock
     if (next_free == 0){
+        free(dirName);
+        free(read_block);
         return ERR_DISK_FULL;
     }
     read_block[3] = 0;
@@ -1234,6 +1289,9 @@ int tfs_createDir(char* dirPath){
     readBlock(mountedDiskNum,0,read_block);
     read_block[2] = next_free;
     writeBlock(mountedDiskNum,0,read_block);
+
+    free(dirName);
+    free(read_block);
     return 0;
 }
 
@@ -1260,7 +1318,7 @@ int tfs_removeDir(char *dirname)
     //check if it's a directory
     if (read_block[0] != '5' || read_block[1] != 0x44)
     {
-        return -1;
+        return ERR_INVALID_TINYFS;
     }
     //set the buffer to be a free block ready to overwrite the deleted directory block
     buffer[0] = '4';
@@ -1272,7 +1330,7 @@ int tfs_removeDir(char *dirname)
         //error if we somehow reach a non-null character
         if (read_block[i] != 0x00)
         {
-            return -1;
+            return ERR_INVALID_TINYFS;
         }
     }
     //HAVE TO DELETE DIRECTORY FROM ROOT DIRECTORY SOMEHOW SOMEWAY
@@ -1297,6 +1355,8 @@ int tfs_seek(fileDescriptor FD, int offset){
     readBlock(mountedDiskNum,root_inode,read_block);
     int cur_directory = read_block[2];
     if (cur_directory == 0){
+        free(temp_fil);
+        free(read_block);
         return ERR_DISK_FULL;
     }
     readBlock(mountedDiskNum,cur_directory,read_block);
@@ -1305,7 +1365,7 @@ int tfs_seek(fileDescriptor FD, int offset){
     if (node == NULL){
         free(temp_fil);
         free(read_block);
-        return -1;    
+        return ERR_NO_FILE;    
     }
     char* filename = node -> fileName;
     int inode = searchForFile(filename, read_block, temp_fil);
@@ -1331,6 +1391,8 @@ int tfs_readByte(fileDescriptor FD, char* buffer){
     readBlock(mountedDiskNum,root_inode,read_block);
     int cur_directory = read_block[2];
     if (cur_directory == 0){
+        free(temp_fil);
+        free(read_block);
         return ERR_DISK_FULL;
     }
     readBlock(mountedDiskNum,cur_directory,read_block);
@@ -1341,7 +1403,7 @@ int tfs_readByte(fileDescriptor FD, char* buffer){
     {
         free(read_block);
         free(temp_fil); 
-        return -1;
+        return ERR_NO_FILE;
     }
     char* filename = fil->fileName;
     int inode = searchForFile(filename, read_block, temp_fil);
@@ -1360,13 +1422,15 @@ int tfs_readByte(fileDescriptor FD, char* buffer){
     int file_pointer = fp_bytes + fp_blocks*(BLOCKSIZE-4); 
     int file_extent = read_block[2];
     if (file_extent == 0){
+        free(temp_fil);
+        free(read_block);
         return ERR_DISK_FULL;
     }
 
     if (file_pointer >= file_size)
     {
         //error if file pointer past the end of the file
-        return -1;
+        return ERR_PAST_EOF;
     }
     else
     {
@@ -1385,6 +1449,8 @@ int tfs_readByte(fileDescriptor FD, char* buffer){
             readBlock(mountedDiskNum, file_extent, read_block);
             file_extent = read_block[2]; //next file_extent file if needed
             if (file_extent == 0){
+                free(temp_fil);
+                free(read_block);
                 return ERR_DISK_FULL;
             }
             blocksToRead = blocksToRead - 1;
@@ -1393,8 +1459,6 @@ int tfs_readByte(fileDescriptor FD, char* buffer){
         //copies the current byte pointed by filepointer into buffer?
         buffer[0] = read_block[currByte+4];
         buffer[1] = '\0';
-        // strncpy(buffer, read_block[currByte], 1);
-        //valid af
         return 1;
 
     }
