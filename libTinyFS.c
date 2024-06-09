@@ -80,6 +80,15 @@ static Node* findNode(fileDescriptor fd) {
     return NULL; // Key not found
 }
 
+static int modifyFilename(fileDescriptor fd, char* newFileName){
+    Node* n = findNode(fd);
+    if (n == NULL){
+        return -1;
+    }else{
+        n->fileName = newFileName;
+    } 
+}
+
 static Node* findNodeFilename(char* filename) {
     Node* current = openedFiles;
     while (current != NULL) {
@@ -368,12 +377,15 @@ static int searchForFile(char* path, char* root_buffer, char* filename){
         if (path[i] == '/'){
             //directory name 
             char* dirName = substring(path,anchor,i);
+            printf("dirName %s\n", dirName);
             // read the superblock, find the root directory inode
             inode = checkDirectory(dirName,root_buffer);
+            printf("inode %d\n", inode);
             free(dirName);
             if (inode != 0){
                 readBlock(mountedDiskNum,inode,root_buffer);
                 cur_directory = root_buffer[2];
+                printf("cur directory %d\n", inode);
                 readBlock(mountedDiskNum,cur_directory,root_buffer);
                 // now read_block has the contents of the directory
             }else{
@@ -401,7 +413,7 @@ static int getRecentDirectory(char* path, char* root_buffer){
     int anchor = 1;
     int inode;
     int i;
-    int cur_directory;
+    int cur_directory = 0;
 
     if (path[0] != '/'){
         return -20;
@@ -478,18 +490,26 @@ int addNewFile(char* name){
     readBlock(mountedDiskNum,root_inode,read_block);
     int cur_directory = read_block[2];
     readBlock(mountedDiskNum,cur_directory,read_block);
-
+    int subDir;
     char* filename = (char *)malloc(9*sizeof(char));
-    if (searchForFile(name,read_block,filename) < 0){
+    int inode = searchForFile(name,read_block,filename);
+    if(inode < 0){
         return -30;
-    }
-
+    }else if (inode == 0){
+        // assume we add to the root directory
+        subDir = cur_directory;
+    }else{
+        readBlock(mountedDiskNum, inode,read_block);
+        subDir = read_block[2];
+    }   
     printf("my filename: %s\n",filename);
 
     // for directory implementation we are adding the filename
     // the current directory is in read_block
+    readBlock(mountedDiskNum, subDir, read_block);    
+
     addFileToBuffer(filename,read_block,freeBlock);
-    writeBlock(mountedDiskNum,cur_directory,read_block);
+    writeBlock(mountedDiskNum,subDir,read_block);
  
     for (i=0;i<8;i++){
         if (filename[i] == '\0'){
@@ -750,6 +770,9 @@ int tfs_deleteFile(fileDescriptor FD)
 
     //find inode block based on file descriptor
     Node* fil = findNode(FD);
+    if (fil == NULL){
+        return -2;
+    }
     char* path = fil->fileName;
     int inode = searchForFile(path, read_block, temp_fil);
 
@@ -883,10 +906,38 @@ int tfs_rename(fileDescriptor FD, char* newName)
     {
         return -1;
     }
-    char* path = fil->fileName;
 
+    
+    char* path = fil->fileName;
+    int len = strlen(path);
+
+    // lets change the global node block to reflect our new name
+    // only need to change the last part of the file
+    int k;
+    for (k=strlen(path);k>=0;k--){
+        if (path[k] == '/'){
+            break;
+        }
+    }
+    char* newPath = (char*)malloc(strlen(path) * sizeof(char));
+    strncpy(newPath,path,len);   
+    for (i=0;i<strlen(newName);i++){
+        newPath[i+k+1] = newName[i]; 
+    }
+    newPath[i+k+1] = '\0';
+    
+    printf("newpath: %s\n", newPath); 
+    modifyFilename(FD, newPath);
+    free(newPath);
+ 
     //retrieve inode block and change the name within the inode block
     int inode = searchForFile(path, read_block, temp_fil);
+    if (inode < 0){
+        return inode; // invalid diretory or other 
+    }else if (inode == 0){
+        return -20;
+    }
+    
     readBlock(mountedDiskNum, inode, read_block);
     for (i = 0; i < 8; i++)
     {
@@ -912,6 +963,7 @@ int tfs_rename(fileDescriptor FD, char* newName)
     if (dir_inode <= 0){
         dir_inode = cur_directory;// assume its the root 
     }
+    printf("dir_inode: %d\n",dir_inode);
  
     // we know have the most recent directory in read_block 
     readBlock(mountedDiskNum,dir_inode,read_block);
@@ -922,14 +974,14 @@ int tfs_rename(fileDescriptor FD, char* newName)
         return -1;
     }
     writeBlock(mountedDiskNum,dir_inode,read_block);
-    
+
     free(read_block);
     free(temp_fil);
     return 1;
 }
 
 // returns the inode of this 
-int tfs_createDir(char* dirName){
+int tfs_createDir(char* dirPath){
     // we want to create a directory if it doesn't exist already
     char* dirName = (char*)malloc(sizeof(char) * 9);
     char* read_block = (char*)malloc(sizeof(char) * BLOCKSIZE);
@@ -944,7 +996,7 @@ int tfs_createDir(char* dirName){
     readBlock(mountedDiskNum,cur_directory,read_block);
 
 
-    int inode = searchForFile(dirName,read_block,dirName);
+    int inode = searchForFile(dirPath,read_block,dirName);
     if (inode < 0){
         return inode; // invalid diretory or other 
     }else if (inode == 0){
@@ -953,7 +1005,7 @@ int tfs_createDir(char* dirName){
         return inode; // the inode of this directory
     }
 
-    int dir_inode = getRecentDirectory(path,read_block);
+    int dir_inode = getRecentDirectory(dirPath,read_block);
     if (dir_inode <= 0){
         dir_inode = cur_directory;// assume its the root 
     }
@@ -969,17 +1021,27 @@ int tfs_createDir(char* dirName){
     readBlock(mountedDiskNum,free_block,read_block);
     read_block[0] = '5';
     read_block[1] = MAGIC_NUMBER;
-    int next_free = read_block[2] ; // defaults to next free_block - save to superblock
+    int next_free = read_block[2] ; // defaults to next free_block - use for the directory content
     read_block[3] = 0;
-    
+   
+    int i; 
     for (i=0;i<8;i++){
         if (dirName[i] == '\0'){
             break;
         }
-        inode_block[4+i] = dirName[i];
+        read_block[4+i] = dirName[i];
     }   
     writeBlock(mountedDiskNum,free_block,read_block);
 
+    // directory content
+    free_block = next_free;
+    readBlock(mountedDiskNum,free_block,read_block);
+    read_block[0] = '3';
+    read_block[1] = MAGIC_NUMBER;
+    next_free = read_block[2] ; // defaults to next free_block - save to superblock
+    read_block[3] = 0;
+    writeBlock(mountedDiskNum,free_block,read_block);
+     
     // write to the superblock
     readBlock(mountedDiskNum,0,read_block);
     read_block[2] = next_free;
@@ -1140,8 +1202,9 @@ int main(){
     printf("%d\n",tfs_mkfs("disk0.dsk",2562));
     tfs_mount("disk0.dsk");
     fileDescriptor fd = tfs_openFile("/ritvik");
+    printf("fd %d\n",fd);
     fileDescriptor fd2 = tfs_openFile("/joel");
-    
+    printf("fd %d\n",fd);
     fileDescriptor fd3 = tfs_openFile("/joel");
     char* message = "hi my name is Joel. Tymon is an asshole! What does life mean? Computer Science is the worst major in the world!AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
     printf("strlen %d\n", strlen(message));
@@ -1161,10 +1224,13 @@ int main(){
     printf("%d\n",err);
     tfs_deleteFile(fd);
 
-    createDir("/temp");
-    
-    tfs_readdir(); 
-    tfs_rename(fd2,"tymon");
+    tfs_createDir("/temp");
+
+    fileDescriptor fd4 = tfs_openFile("/temp/test");
+    //printf("%d\n",fd4);
+    tfs_createDir("/temp/subdir");
+    err = tfs_rename(fd2,"tymon");
+    printf("err %d\n", err);
     tfs_unmount();
     return 0;
 }
